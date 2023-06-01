@@ -834,20 +834,20 @@ end do
 Tsfix=Ts
 TMAX=7000.0_wp
 
-do ix3=1,lx3
-  do ix2=1,lx2
-    do ix1=1,lx1
-        if (Tsfix(ix1,ix2,ix3,lsp)>TMAX) then
-          tcount=tcount+1
-          Tsfix(ix1,ix2,ix3,lsp)=TMAX
-        end if
-    end do
-  end do
-end do
+! do ix3=1,lx3
+!   do ix2=1,lx2
+!     do ix1=1,lx1
+!         if (Tsfix(ix1,ix2,ix3,lsp)>TMAX) then
+!           tcount=tcount+1
+!           Tsfix(ix1,ix2,ix3,lsp)=TMAX
+!         end if
+!     end do
+!   end do
+! end do
 
-if (tcount>0) then 
-  PRINT *, tcount
-end if
+! if (tcount>0) then 
+!   PRINT *, tcount
+! end if
 
 !! Average Collisuons frequencies: first averaging over neutrals
 do isp=1,lsp
