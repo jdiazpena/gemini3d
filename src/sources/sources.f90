@@ -831,8 +831,8 @@ do isp=1,lsp-1
 end do
 
 !Fix attempt, any temperature above 8000 is 8000 (only electrons)
-Tsfix=Ts
-TMAX=7000.0_wp
+! Tsfix=Ts
+! TMAX=7000.0_wp
 
 ! do ix3=1,lx3
 !   do ix2=1,lx2
@@ -852,7 +852,7 @@ TMAX=7000.0_wp
 !! Average Collisuons frequencies: first averaging over neutrals
 do isp=1,lsp
   do isp2=1,ln
-    call maxwell_colln(isp,isp2,nn,Tn,Tsfix,nu)
+    call maxwell_colln(isp,isp2,nn,Tn,Ts,nu)
     nsuAvg(:,:,:,isp)=nsuAvg(:,:,:,isp)+nu*nuW(:,:,:,isp2) !Store the collision frequencies weighted by massdensity
   end do
   nsuAvg(:,:,:,isp)=nsuAvg(:,:,:,isp)/sum(nuW, dim=4) !! Average over all neutrals weighted by MassDensity
@@ -886,8 +886,8 @@ ke=abs(omegae/nuAvg(:,:,:,2))
 phi=1.0_wp/(ke*ki)
 
 !!Average ion temperature
-TsAvg(:,:,:,1)=(Tsfix(1:lx1,1:lx2,1:lx3,2)*niW(:,:,:,2)+Tsfix(1:lx1,1:lx2,1:lx3,4)*niW(:,:,:,4))/(niW(:,:,:,2)+niW(:,:,:,4))
-TsAvg(:,:,:,2)=Tsfix(1:lx1,1:lx2,1:lx3,lsp)
+TsAvg(:,:,:,1)=(Ts(1:lx1,1:lx2,1:lx3,2)*niW(:,:,:,2)+Ts(1:lx1,1:lx2,1:lx3,4)*niW(:,:,:,4))/(niW(:,:,:,2)+niW(:,:,:,4))
+TsAvg(:,:,:,2)=Ts(1:lx1,1:lx2,1:lx3,lsp)
 
 !doi:10.1029/2011JA016649
 Eth0=20.0_wp*SQRT((TsAvg(:,:,:,1)+TsAvg(:,:,:,2))/600.0_wp)*(Bmagnitude/5.0e-5_wp) !B is written as 5e4nT, to T
