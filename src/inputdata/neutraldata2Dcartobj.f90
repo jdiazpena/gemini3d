@@ -10,6 +10,7 @@ use neutraldata2Dobj, only: neutraldata2D
 use reader, only: get_simsize3
 
 implicit none (type, external)
+private
 public :: neutraldata2Dcart
 
 !> type extension for neutral 2D axisymmetric input data
@@ -56,11 +57,11 @@ contains
     class(neutraldata2Dcart), intent(inout) :: self
     type(gemini_cfg), intent(in) :: cfg
     class(curvmesh), intent(in) :: x
-    real(wp) :: theta1,phi1,theta2,phi2,gammarads,theta3,phi3,gamma1,gamma2,phip
+    real(wp) :: theta1,phi1,theta2,phi2,theta3,phi3,gamma1,gamma2,phip
     real(wp) :: xp,yp
-    real(wp), dimension(3) :: ezp,eyp,tmpvec,exprm
+    real(wp), dimension(3) :: ezp,eyp,tmpvec
     real(wp) :: tmpsca
-    integer :: ix1,ix2,ix3,iyn,izn,ixn,iid,ierr
+    integer :: ix1,ix2,ix3
 
     ! Space for coordinate sites and projections in neutraldata2D object
     print*, x%lx1,x%lx2,x%lx3
@@ -77,7 +78,7 @@ contains
 
     !Convert plasma simulation grid locations to z,rho values to be used in interoplation.  altitude ~ zi; lat/lon --> rhoi.  Also compute unit vectors and projections
     print *, 'Computing alt,radial distance values for plasma grid and completing rotations'
-    self%zimat=x%alt     !vertical coordinate
+    self%zimat=x%alt(1:x%lx1,1:x%lx2,1:x%lx3)     !vertical coordinate
     do ix3=1,x%lx3
       do ix2=1,x%lx2
         do ix1=1,x%lx1
@@ -177,14 +178,8 @@ contains
   subroutine load_sizeandgrid_neu2Dcart(self,cfg)
     class(neutraldata2Dcart), intent(inout) :: self
     type(gemini_cfg), intent(in) :: cfg
-    integer :: ix1,ix2,ix3,ihorzn,izn,iid,ierr
-    integer :: lxntmp,lyntmp                                   ! local copies for root, eventually these need to be stored in object
-    real(wp) :: maxzn
-    real(wp), dimension(2) :: xnrange,ynrange                ! these eventually get stored in extents
-    integer, dimension(6) :: indices                         ! these eventually get stored in indx
-    integer :: ixn,iyn
-    integer :: lxn,lyn
-    real(wp) :: meanxn,meanhorzn
+    integer :: ihorzn,izn
+    real(wp) :: meanhorzn
     real(wp) :: dhorzn
 
     !horizontal grid spacing
@@ -196,7 +191,7 @@ contains
 
     ! bit of a tricky issue here; for neutral input, according to makedneuframes.m, the first integer in the size file is
     !  the horizontal grid point count for the input - which get_simsize3 interprets as lx1...
-    call get_simsize3(cfg%sourcedir, lx1=self%lhorzn, lx2all=self%lzn)
+    call get_simsize3(cfg%sourcedir // "/simsize.h5", lx1=self%lhorzn, lx2all=self%lzn)
 
     print *, 'Neutral data has lhorzn,lz size:  ',self%lhorzn,self%lzn,' with spacing dhorzn,dz',dhorzn,cfg%dzn
     if (self%lhorzn < 1 .or. self%lzn < 1) then

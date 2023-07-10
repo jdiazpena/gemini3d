@@ -8,10 +8,11 @@ use grid, only : lx1,lx2,lx3
 use meshobj, only: curvmesh
 use interpolation, only : interp1,interp2
 use timeutils, only : dateinc, date_filename, find_lastdate
-use mpimod, only: mpi_integer, mpi_comm_world, mpi_status_ignore, &
-mpi_realprec, mpi_cfg, tag=>gemini_mpi
+use mpimod, only: mpi_realprec, mpi_cfg, tag=>gemini_mpi
 use gemini3d_config, only: gemini_cfg
 use precipdataobj, only: precipdata
+
+use mpi_f08, only : mpi_integer, mpi_comm_world, mpi_status_ignore
 
 implicit none (type, external)
 private
@@ -19,8 +20,8 @@ public :: precipBCs_fileinput, precipBCs, init_precipinput
 
 contains
   !> initialize variables to hold input file precipitation information, must be called by all workers at the same time
-  subroutine init_precipinput(dt,t,cfg,ymd,UTsec,x,eprecip)
-    real(wp), intent(in) :: dt,t
+  subroutine init_precipinput(dt,cfg,ymd,UTsec,x,eprecip)
+    real(wp), intent(in) :: dt
     type(gemini_cfg), intent(in) :: cfg
     integer, dimension(3), intent(in) :: ymd
     real(wp), intent(in) :: UTsec
@@ -70,20 +71,19 @@ contains
 
 
   !> This is the default subroutine that is called for electron precipitation if file input is not used.
-  subroutine precipBCs(t,x,cfg,W0,PhiWmWm2)
+  subroutine precipBCs(cfg,W0,PhiWmWm2)
     !------------------------------------------------------------
     !-------LOAD UP ARRAYS CONTAINING TOP BOUNDARY CHAR. ENERGY
     !-------AND TOTAL ENERGY FLUX.  GRID VARIABLES INCLUDE
     !-------GHOST CELLS
     !------------------------------------------------------------
-    real(wp), intent(in) :: t
-    class(curvmesh), intent(in) :: x
+
     type(gemini_cfg), intent(in) :: cfg
     real(wp), dimension(:,:,:), intent(inout) :: W0,PhiWmWm2
     !! intent(out)
-    real(wp) :: W0pk,PhiWpk,meanW0x3,meanPhiWx3,sigW0x3,sigPhiWx3
-    real(wp) :: sigx2,meanx3,sigx3,x30amp,varc,meanx2,x2enve,sigt,meant
-    integer :: ix2,ix3,iprec,lx2,lx3,lprec
+    real(wp) :: W0pk,PhiWpk
+    real(wp) :: sigx2,sigx3,x30amp,varc,meanx2,sigt,meant
+    integer :: ix2,ix3,lx2,lx3,lprec
 
 
     lx2=size(W0,1)

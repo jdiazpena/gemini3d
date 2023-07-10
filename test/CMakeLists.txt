@@ -1,4 +1,4 @@
-set_property(DIRECTORY PROPERTY  LABELS unit)
+set_property(DIRECTORY PROPERTY LABELS unit)
 
 if(matlab)
   include(${PROJECT_SOURCE_DIR}/cmake/matlab.cmake)
@@ -10,14 +10,12 @@ add_executable(test_mpi test_mpi.f90)
 target_link_libraries(test_mpi PRIVATE MPI::MPI_Fortran)
 
 add_test(NAME mpi_basic
-COMMAND COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${Ncpu} $<TARGET_FILE:test_mpi> ${Ncpu}
+COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${Ncpu} $<TARGET_FILE:test_mpi> ${Ncpu}
 )
 
 set_tests_properties(mpi_basic PROPERTIES
-TIMEOUT 30
 PROCESSORS ${Ncpu}
 FIXTURES_SETUP mpi_fxt
-RESOURCE_LOCK cpu_mpi
 )
 
 # --- SCALAPACK
@@ -27,7 +25,6 @@ target_link_libraries(gemini_scalapack PRIVATE SCALAPACK::SCALAPACK LAPACK::LAPA
 
 add_test(NAME scalapack COMMAND gemini_scalapack)
 set_tests_properties(scalapack PROPERTIES
-TIMEOUT 15
 FIXTURES_REQUIRED mpi_fxt
 FIXTURES_SETUP scalapack_fxt
 )
@@ -36,23 +33,25 @@ FIXTURES_SETUP scalapack_fxt
 add_executable(test_mumps test_mumps.f90)
 target_link_libraries(test_mumps PRIVATE mumps_interface
 MUMPS::MUMPS
-"$<$<BOOL:${MUMPS_HAVE_Scotch}>:Scotch::Scotch;METIS::METIS>"
 )
 # same link logic applied to gemini.bin
 
 add_test(NAME mumps_basic
 COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 $<TARGET_FILE:test_mumps>
-WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 set_tests_properties(mumps_basic PROPERTIES
-TIMEOUT 15
+WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 PROCESSORS 2
-RESOURCE_LOCK cpu_mpi
 REQUIRED_FILES ${CMAKE_CURRENT_SOURCE_DIR}/input_simpletest_real.nml
 FIXTURES_REQUIRED scalapack_fxt
 FIXTURES_SETUP mumps_fxt
 )
+
+set_property(TEST mpi_basic mumps_basic PROPERTY RESOURCE_LOCK cpu_mpi)
+if(DEFINED mpi_tmpdir)
+  set_property(TEST mpi_basic mumps_basic PROPERTY ENVIRONMENT "TMPDIR=${mpi_tmpdir}")
+endif()
 
 dll_test_path("SCALAPACK::SCALAPACK;MUMPS::MUMPS" "scalapack;mumps_basic")
 
@@ -85,7 +84,6 @@ add_test(NAME gemini3d_run_ok COMMAND gemini3d.run)
 set_tests_properties(gemini3d_run_ok PROPERTIES
 PASS_REGULAR_EXPRESSION "EOF: gemini3d.run"
 FIXTURES_SETUP gemini_exe_fxt
-TIMEOUT 10
 )
 
 # --- Windows needs DLLs on path
@@ -108,13 +106,11 @@ add_test(NAME magcalc_exe_ok COMMAND magcalc.bin)
 set_tests_properties(magcalc_exe_ok PROPERTIES
 PASS_REGULAR_EXPRESSION "EOF: magcalc.bin"
 LABELS unit
-TIMEOUT 10
 )
 
 add_test(NAME magcalc_run_ok COMMAND magcalc.run)
 set_tests_properties(magcalc_run_ok PROPERTIES
 PASS_REGULAR_EXPRESSION "EOF: magcalc.run"
-TIMEOUT 10
 )
 
 dll_test_path("ffilesystem::filesystem;h5fortran::h5fortran;HDF5::HDF5" "magcalc_exe_ok;magcalc_run_ok")

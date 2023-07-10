@@ -1,6 +1,7 @@
 submodule(io:io_aurora) io_aurora_hdf5
 
 use h5fortran, only: hdf5_file
+use mpimod, only : gather_recv
 
 implicit none (type, external)
 
@@ -11,9 +12,6 @@ module procedure output_aur_root_hdf5
   !! NO GHOST CELLS (I HOPE)
 
   type(hdf5_file) :: hout
-
-  real(wp), dimension(1:lwave,1:lx2,1:lx3) :: ivertmp
-  real(wp), dimension(1:lwave,1:lx2all,1:lx3all) :: iverall
 
   real(wp), dimension(1:lx2,1:lx3) :: emistmp                !< single emission subgrid
   real(wp), dimension(1:lx2all,1:lx3all) :: emisall          !< single emission total grid

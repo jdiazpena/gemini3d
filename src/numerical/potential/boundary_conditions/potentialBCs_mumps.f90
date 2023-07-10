@@ -18,9 +18,10 @@ private
 public :: potentialbcs2D, potentialbcs2D_fileinput, init_Efieldinput, &
             compute_rootBGEfields
 contains
-  subroutine init_Efieldinput(dt,t,cfg,ymd,UTsec,x,efield)
+  subroutine init_Efieldinput(dt,cfg,ymd,UTsec,x,efield)
     !> Initialize variables to hold electric field input file data, can be called by any worker but only root does anything
-    real(wp), intent(in) :: dt,t
+    !    We need some alternate code to deal with the situation where we are running without mpi...
+    real(wp), intent(in) :: dt
     type(gemini_cfg), intent(in) :: cfg
     integer, dimension(3), intent(in) :: ymd
     real(wp), intent(in) :: UTsec
@@ -164,7 +165,6 @@ contains
     integer :: ix1,ix2,ix3
     real(wp) :: h2ref,h3ref
     integer :: ix1ref,ix2ref,ix3ref    ! reference locations for field line mapping
-    integer :: ix1eq=-1                ! index for the equatorial location in terms of index into the x%x1 array; used by default boundary conditions
 
     !! the only danger here is that this routine could be called before any module data are loaded
     !   so check just to make sure it isn't being misused in this way
@@ -220,14 +220,10 @@ contains
     real(wp), dimension(:,:,:), intent(inout) :: E01all,E02all,E03all
     !! intent(out)
     integer, intent(out) :: flagdirich
-    real(wp), dimension(1:size(Vmaxx1,1),1:size(Vmaxx1,2)) :: Emaxx1    !pseudo-electric field
     real(wp) :: Phipk
     integer :: ix1,ix2,ix3    !grid sizes are borrowed from grid module
-    integer :: im
     !    integer, parameter :: lmodes=8; this type of thing done from input scripts now...
-    real(wp) :: phase
-    real(wp), dimension(1:size(Vmaxx1,1)) :: x3dev
-    real(wp) :: meanx2,sigx2,meanx3,sigx3,meant,sigt,sigcurv,x30amp,varc    !for setting background field
+    real(wp) :: meanx2,sigx2,meanx3,sigx3 !for setting background field
     real(wp), dimension(:,:), pointer :: Vtopalt,Vbotalt
     real(wp) :: vamp,LThrs,veltime,z,glonmer
     integer :: ix1eq=-1                ! index for the equatorial location in terms of index into the x%x1 array; used by default boundary conditions

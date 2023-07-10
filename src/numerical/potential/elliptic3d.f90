@@ -22,7 +22,6 @@ integer :: iPhi,ient
 integer, dimension(:), allocatable :: ir,ic
 real(wp), dimension(:), allocatable :: M
 real(wp), dimension(:), allocatable :: b
-real(wp) :: tstart,tfin
 
 type (MUMPS_STRUC) :: mumps_par
 
@@ -174,7 +173,7 @@ if (debug) print *, 'Number of entries used:  ',ient-1
 
 !> INIT MUMPS
 
-mumps_par%COMM = MPI_COMM_WORLD
+mumps_par%COMM = MPI_COMM_WORLD%mpi_val
 mumps_par%JOB = -1
 mumps_par%SYM = 0
 mumps_par%PAR = 1
@@ -266,7 +265,6 @@ integer :: iPhi,ient
 integer, dimension(:), allocatable :: ir,ic
 real(wp), dimension(:), allocatable :: M
 real(wp), dimension(:), allocatable :: b
-real(wp) :: tstart,tfin
 integer :: ix3prev,ix3next
 
 type (MUMPS_STRUC) :: mumps_par
@@ -417,7 +415,7 @@ if (debug) print *, 'Number of entries used:  ',ient-1
 
 
 !> INIT MUMPS
-mumps_par%COMM = MPI_COMM_WORLD
+mumps_par%COMM = MPI_COMM_WORLD%mpi_val
 mumps_par%JOB = -1
 mumps_par%SYM = 0
 mumps_par%PAR = 1

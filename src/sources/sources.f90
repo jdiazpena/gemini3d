@@ -411,7 +411,6 @@ do isp=1,lsp
   !ARTIFICIAL VISCOSITY
   gradQ=grad3D1(Q(:,:,:,isp),x,1,lx1,1,lx2,1,lx3)                         !derivative should be from 1:lx1
 
-
   !GEOMETRIC FACTORS ARISING FROM ADVECTINO OF 1-COMPONENT OF MOMENTUM DENSITY
   geom=(vs2(1:lx1,1:lx2,1:lx3,isp)**2*x%h3(1:lx1,1:lx2,1:lx3)*dh2dx1+ &
         vs3(1:lx1,1:lx2,1:lx3,isp)**2*x%h2(1:lx1,1:lx2,1:lx3)*dh3dx1)*ns(1:lx1,1:lx2,1:lx3,isp)*ms(isp)/h1h2h3
@@ -424,6 +423,13 @@ do isp=1,lsp
                 -gradQ &
                 +geom &
                 +ns(1:lx1,1:lx2,1:lx3,isp)*ms(isp)*x%g1
+
+  ! print*, minval(E1filt),maxval(E1filt),minval(E1),maxval(E1)
+!  Pr(:,:,:,isp)=ns(1:lx1,1:lx2,1:lx3,isp)*qs(isp)*(E1filt+Epol1) &
+!                -pressure*gradlp1 &
+!                -gradQ &
+!                +geom &
+!                +ns(1:lx1,1:lx2,1:lx3,isp)*ms(isp)*x%g1
 end do
 
 end subroutine srcsMomentum_curv
@@ -443,7 +449,7 @@ real(wp), dimension(-1:,-1:,-1:,:), intent(in) :: ns,vs1,vs2,vs3,Ts
 real(wp), dimension(size(Ts,1)-4,size(Ts,2)-4,size(Ts,3)-4,lsp), intent(inout) :: Pr,Lo
 !! intent(out)
 
-integer :: ix1,ix2,ix3,lx1,lx2,lx3,isp,isp2
+integer :: lx1,lx2,lx3,isp,isp2
 real(wp), dimension(size(Ts,1)-4,size(Ts,2)-4,size(Ts,3)-4) :: nu,Phisj,Psisj
 real(wp), dimension(size(Ts,1)-4,size(Ts,2)-4,size(Ts,3)-4) :: fact,iePT,ieLT,f,g    !work arrays
 real(wp) :: sfact

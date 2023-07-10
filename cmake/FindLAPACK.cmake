@@ -23,7 +23,7 @@ infrequently used Lapack libraries and is unreliable for me.
 Tested on Linux, MacOS and Windows with:
 * GCC / Gfortran
 * Clang / Flang
-* Intel (icc, ifort)
+* IntelLLVM
 * Cray
 
 
@@ -50,6 +50,10 @@ COMPONENTS default to Netlib LAPACK / LapackE, otherwise:
 
 ``LAPACK95``
   get Lapack95 interfaces for MKL or Netlib (must also specify one of MKL, Netlib)
+
+``STATIC``
+  Library search default on non-Windows is shared then static. On Windows default search is static only.
+  Specifying STATIC component searches for static libraries only.
 
 
 Result Variables
@@ -88,18 +92,21 @@ function(atlas_libs)
 find_library(ATLAS_LIB
 NAMES atlas
 PATH_SUFFIXES atlas
+DOC "ATLAS library"
 )
 
 find_library(LAPACK_ATLAS
 NAMES ptlapack lapack_atlas lapack
 NAMES_PER_DIR
 PATH_SUFFIXES atlas
+DOC "LAPACK ATLAS library"
 )
 
 find_library(BLAS_LIBRARY
 NAMES ptf77blas f77blas blas
 NAMES_PER_DIR
 PATH_SUFFIXES atlas
+DOC "BLAS ATLAS library"
 )
 
 # === C ===
@@ -107,10 +114,12 @@ find_library(BLAS_C_ATLAS
 NAMES ptcblas cblas
 NAMES_PER_DIR
 PATH_SUFFIXES atlas
+DOC "BLAS C ATLAS library"
 )
 
 find_path(LAPACK_INCLUDE_DIR
 NAMES cblas-atlas.h cblas.h clapack.h
+DOC "ATLAS headers"
 )
 
 #===========
@@ -133,11 +142,13 @@ if(LAPACK95 IN_LIST LAPACK_FIND_COMPONENTS)
   NAMES f95_lapack.mod
   HINTS ${LAPACK95_ROOT} ENV LAPACK95_ROOT
   PATH_SUFFIXES include
+  DOC "LAPACK95 Fortran module"
   )
 
   find_library(LAPACK95_LIBRARY
   NAMES lapack95
   HINTS ${LAPACK95_ROOT} ENV LAPACK95_ROOT
+  DOC "LAPACK95 library"
   )
 
   if(NOT (LAPACK95_LIBRARY AND LAPACK95_INCLUDE_DIR))
@@ -151,6 +162,7 @@ endif(LAPACK95 IN_LIST LAPACK_FIND_COMPONENTS)
 find_library(LAPACK_LIBRARY
 NAMES lapack
 PATH_SUFFIXES lapack lapack/lib
+DOC "LAPACK library"
 )
 if(NOT LAPACK_LIBRARY)
   return()
@@ -161,12 +173,14 @@ if(LAPACKE IN_LIST LAPACK_FIND_COMPONENTS)
   find_library(LAPACKE_LIBRARY
   NAMES lapacke
   PATH_SUFFIXES lapack lapack/lib
+  DOC "LAPACKE library"
   )
 
   # lapack/include for Homebrew
   find_path(LAPACKE_INCLUDE_DIR
   NAMES lapacke.h
   PATH_SUFFIXES lapack lapack/include
+  DOC "LAPACKE include directory"
   )
   if(NOT (LAPACKE_LIBRARY AND LAPACKE_INCLUDE_DIR))
     return()
@@ -184,6 +198,7 @@ find_library(BLAS_LIBRARY
 NAMES refblas blas
 NAMES_PER_DIR
 PATH_SUFFIXES lapack lapack/lib blas
+DOC "BLAS library"
 )
 
 if(NOT BLAS_LIBRARY)
@@ -205,16 +220,19 @@ function(openblas_libs)
 find_library(LAPACK_LIBRARY
 NAMES lapack
 PATH_SUFFIXES openblas
+DOC "LAPACK library"
 )
 
 find_library(BLAS_LIBRARY
 NAMES openblas blas
 NAMES_PER_DIR
 PATH_SUFFIXES openblas
+DOC "BLAS library"
 )
 
 find_path(LAPACK_INCLUDE_DIR
 NAMES cblas-openblas.h cblas.h f77blas.h openblas_config.h
+DOC "LAPACK include directory"
 )
 
 if(NOT (LAPACK_LIBRARY AND BLAS_LIBRARY))
@@ -251,10 +269,12 @@ endif()
 foreach(s ${_mkl_libs})
   find_library(LAPACK_${s}_LIBRARY
   NAMES ${s}
-  PATHS ${MKLROOT}
-  PATH_SUFFIXES lib lib/intel64
+  PATHS ${MKLROOT}/lib ${MKLROOT}/lib/intel64 ${oneapi_libdir}
   NO_DEFAULT_PATH
+  DOC "Intel MKL ${s} library"
   )
+  # ${MKLROOT}/[lib[/intel64]]: general MKL libraries
+  # oneapi_libdir: openmp library
 
   if(NOT LAPACK_${s}_LIBRARY)
     return()
@@ -268,6 +288,7 @@ NAMES mkl_lapack.h
 HINTS ${MKLROOT}
 PATH_SUFFIXES include
 NO_DEFAULT_PATH
+DOC "Intel MKL header"
 )
 
 if(NOT LAPACK_INCLUDE_DIR)
@@ -299,12 +320,28 @@ endif()
 
 find_package(Threads)
 
+if(STATIC IN_LIST LAPACK_FIND_COMPONENTS)
+  set(_orig_suff ${CMAKE_FIND_LIBRARY_SUFFIXES})
+  set(CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_STATIC_LIBRARY_SUFFIX})
+endif()
+
 # ==== generic MKL variables ====
 
-if(MKL IN_LIST LAPACK_FIND_COMPONENTS)
+if(MKL IN_LIST LAPACK_FIND_COMPONENTS OR MKL64 IN_LIST LAPACK_FIND_COMPONENTS)
   # we have to sanitize MKLROOT if it has Windows backslashes (\) otherwise it will break at build time
   # double-quotes are necessary per CMake to_cmake_path docs.
   file(TO_CMAKE_PATH "$ENV{MKLROOT}" MKLROOT)
+
+  file(TO_CMAKE_PATH "$ENV{ONEAPI_ROOT}" ONEAPI_ROOT)
+  # oneapi_libdir is where iomp5 is located
+  set(oneapi_libdir ${ONEAPI_ROOT}/compiler/latest/)
+  if(WIN32)
+    string(APPEND oneapi_libdir "windows/compiler/lib/intel64_win")
+  elseif(APPLE)
+    string(APPEND oneapi_libdir "mac/compiler/lib")
+  elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    string(APPEND oneapi_libdir "linux/compiler/lib/intel64_lin")
+  endif()
 
   if(MKL64 IN_LIST LAPACK_FIND_COMPONENTS)
     set(_mkl_bitflag i)
@@ -328,9 +365,10 @@ if(MKL IN_LIST LAPACK_FIND_COMPONENTS)
     list(APPEND _mkl_libs mkl_tbb_thread mkl_core)
     set(_tbb tbb stdc++)
   elseif(OpenMP IN_LIST LAPACK_FIND_COMPONENTS)
-    set(_mp iomp5)
     if(WIN32)
       set(_mp libiomp5md)
+    else()
+      set(_mp iomp5)
     endif()
     if(WIN32 AND BUILD_SHARED_LIBS)
       list(APPEND _mkl_libs mkl_intel_thread_dll mkl_core_dll ${_mp})
@@ -378,6 +416,13 @@ elseif(lapack_cray)
   # LAPACK is implicitly part of Cray PE LibSci, use Cray compiler wrapper.
 endif()
 
+if(STATIC IN_LIST LAPACK_FIND_COMPONENTS)
+  if(LAPACK_LIBRARY)
+    set(LAPACK_STATIC_FOUND true)
+  endif()
+  set(CMAKE_FIND_LIBRARY_SUFFIXES ${_orig_suff})
+endif()
+
 # -- verify library works
 
 function(lapack_check)
@@ -390,13 +435,13 @@ endif()
 
 set(CMAKE_REQUIRED_FLAGS)
 set(CMAKE_REQUIRED_LINK_OPTIONS)
-set(CMAKE_REQUIRED_INCLUDES)
+set(CMAKE_REQUIRED_INCLUDES ${LAPACK_INCLUDE_DIR})
 set(CMAKE_REQUIRED_LIBRARIES ${LAPACK_LIBRARY})
 
 check_fortran_source_compiles(
 "program check_lapack
 use, intrinsic :: iso_fortran_env, only : real32
-implicit none (type, external)
+implicit none
 real(real32), external :: snrm2
 print *, snrm2(1, [0._real32], 1)
 end program"
@@ -407,7 +452,7 @@ SRC_EXT f90
 check_fortran_source_compiles(
 "program check_lapack
 use, intrinsic :: iso_fortran_env, only : real64
-implicit none (type, external)
+implicit none
 real(real64), external :: dnrm2
 print *, dnrm2(1, [0._real64], 1)
 end program"
@@ -447,27 +492,33 @@ set(LAPACK_INCLUDE_DIRS ${LAPACK_INCLUDE_DIR})
 
 if(LAPACK_FOUND)
 # need if _FOUND guard as can't overwrite imported target even if bad
-  if(NOT TARGET BLAS::BLAS)
-    add_library(BLAS::BLAS INTERFACE IMPORTED)
-    set_property(TARGET BLAS::BLAS PROPERTY INTERFACE_LINK_LIBRARIES "${BLAS_LIBRARY}")
-  endif()
 
-  if(NOT TARGET LAPACK::LAPACK)
-    add_library(LAPACK::LAPACK INTERFACE IMPORTED)
-    set_property(TARGET LAPACK::LAPACK PROPERTY INTERFACE_LINK_LIBRARIES "${LAPACK_LIBRARY}")
-    set_property(TARGET LAPACK::LAPACK PROPERTY INTERFACE_INCLUDE_DIRECTORIES "${LAPACK_INCLUDE_DIR}")
-  endif()
 
-  if(LAPACK_LAPACK95_FOUND)
-    set(LAPACK95_LIBRARIES ${LAPACK95_LIBRARY})
-    set(LAPACK95_INCLUDE_DIRS ${LAPACK95_INCLUDE_DIR})
+message(VERBOSE "Lapack libraries: ${LAPACK_LIBRARIES}
+Lapack include directories: ${LAPACK_INCLUDE_DIRS}")
 
-    if(NOT TARGET LAPACK::LAPACK95)
-      add_library(LAPACK::LAPACK95 INTERFACE IMPORTED)
-      set_property(TARGET LAPACK::LAPACK95 PROPERTY INTERFACE_LINK_LIBRARIES "${LAPACK95_LIBRARY}")
-      set_property(TARGET LAPACK::LAPACK95 PROPERTY INTERFACE_INCLUDE_DIRECTORIES "${LAPACK95_INCLUDE_DIR}")
-    endif()
+if(NOT TARGET BLAS::BLAS)
+  add_library(BLAS::BLAS INTERFACE IMPORTED)
+  set_property(TARGET BLAS::BLAS PROPERTY INTERFACE_LINK_LIBRARIES "${BLAS_LIBRARY}")
+endif()
+
+if(NOT TARGET LAPACK::LAPACK)
+  add_library(LAPACK::LAPACK INTERFACE IMPORTED)
+  set_property(TARGET LAPACK::LAPACK PROPERTY INTERFACE_LINK_LIBRARIES "${LAPACK_LIBRARY}")
+  set_property(TARGET LAPACK::LAPACK PROPERTY INTERFACE_INCLUDE_DIRECTORIES "${LAPACK_INCLUDE_DIR}")
+endif()
+
+if(LAPACK_LAPACK95_FOUND)
+  set(LAPACK95_LIBRARIES ${LAPACK95_LIBRARY})
+  set(LAPACK95_INCLUDE_DIRS ${LAPACK95_INCLUDE_DIR})
+
+  if(NOT TARGET LAPACK::LAPACK95)
+    add_library(LAPACK::LAPACK95 INTERFACE IMPORTED)
+    set_property(TARGET LAPACK::LAPACK95 PROPERTY INTERFACE_LINK_LIBRARIES "${LAPACK95_LIBRARY}")
+    set_property(TARGET LAPACK::LAPACK95 PROPERTY INTERFACE_INCLUDE_DIRECTORIES "${LAPACK95_INCLUDE_DIR}")
   endif()
 endif()
+
+endif(LAPACK_FOUND)
 
 mark_as_advanced(LAPACK_LIBRARY LAPACK_INCLUDE_DIR)

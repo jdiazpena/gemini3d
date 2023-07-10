@@ -25,7 +25,7 @@ add_test(NAME fullgrid_dipole_testdriver COMMAND fullgrid_dipole_testdriver)
 add_executable(fullgrid_dipole_regen fullgrid_dipole_regen.f90
 $<TARGET_OBJECTS:grid>
 )
-target_link_libraries(fullgrid_dipole_regen PRIVATE reader newton spherical geomagnetic meshobj_dipole meshobj const
+target_link_libraries(fullgrid_dipole_regen PRIVATE reader newton spherical geomagnetic meshobj_dipole meshobj_cart meshobj mpimod autogrid const
 h5fortran::h5fortran
 ffilesystem::filesystem
 )
@@ -50,11 +50,10 @@ endif()
 
 get_property(test_names DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY TESTS)
 
-set_property(TEST ${test_names} PROPERTY TIMEOUT 90)
 set_property(TEST ${test_names} PROPERTY LABELS unit)
 
 if(host_ramGB LESS 8)
   set_property(TEST ${test_names} PROPERTY RESOURCE_LOCK cpu_ram)
 endif()
 
-dll_test_path("h5fortran::h5fortran;LAPACK::LAPACK" "${test_names}")
+dll_test_path("h5fortran::h5fortran;LAPACK::LAPACK;ffilesystem::filesystem" "${test_names}")

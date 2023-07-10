@@ -7,10 +7,13 @@ FindMUMPS
 
 Finds the MUMPS library.
 Note that MUMPS generally requires SCALAPACK and LAPACK as well.
-PORD is always used, in addition to the optional Scotch + METIS.
+PORD is always used, in addition to the optional Scotch or METIS.
 
 COMPONENTS
-  s d c z   list one or more. Default is "s d"
+  s d c z   list one or more. Default is "s d". s: real32, d: real64, c: complex32, z: complex64
+  Scotch  MUMPS built with Scotch
+  METIS   MUMPS build with METIS
+  OpenMP  MUMPS build with OpenMP support
 
 Result Variables
 ^^^^^^^^^^^^^^^^
@@ -20,12 +23,6 @@ MUMPS_LIBRARIES
 
 MUMPS_INCLUDE_DIRS
   dirs to be included
-
-MUMPS_HAVE_OPENMP
-  MUMPS is using OpenMP and thus user programs must link OpenMP as well.
-
-MUMPS_HAVE_Scotch
-  MUMPS is using Scotch/METIS and thus user programs must link Scotch/METIS as well.
 
 #]=======================================================================]
 
@@ -42,20 +39,24 @@ function(mumps_openmp_check)
 # so we do this indirect test to see if MUMPS needs OpenMP to link.
 
 find_package(OpenMP COMPONENTS C Fortran)
-if(OpenMP_FOUND)
-  list(APPEND CMAKE_REQUIRED_FLAGS ${OpenMP_Fortran_FLAGS} ${OpenMP_C_FLAGS})
-  list(APPEND CMAKE_REQUIRED_INCLUDES ${OpenMP_Fortran_INCLUDE_DIRS} ${OpenMP_C_INCLUDE_DIRS})
-  list(APPEND CMAKE_REQUIRED_LIBRARIES ${OpenMP_Fortran_LIBRARIES} ${OpenMP_C_LIBRARIES})
+
+if(NOT OpenMP_FOUND)
+  return()
 endif()
+
+list(APPEND CMAKE_REQUIRED_FLAGS ${OpenMP_Fortran_FLAGS} ${OpenMP_C_FLAGS})
+list(APPEND CMAKE_REQUIRED_INCLUDES ${OpenMP_Fortran_INCLUDE_DIRS} ${OpenMP_C_INCLUDE_DIRS})
+list(APPEND CMAKE_REQUIRED_LIBRARIES ${OpenMP_Fortran_LIBRARIES} ${OpenMP_C_LIBRARIES})
+
 
 check_fortran_source_compiles(
 "program test_omp
-implicit none (type, external)
+implicit none
 external :: mumps_ana_omp_return, MUMPS_ICOPY_32TO64_64C
 call mumps_ana_omp_return()
 call MUMPS_ICOPY_32TO64_64C()
 end program"
-MUMPS_HAVE_OPENMP
+MUMPS_OpenMP_FOUND
 SRC_EXT f90
 )
 
@@ -64,57 +65,105 @@ endfunction(mumps_openmp_check)
 
 function(mumps_scotch_check)
 
-# check if Scotch linked
 find_package(Scotch COMPONENTS ESMUMPS)
-# METIS is required when using Scotch
-if(Scotch_FOUND)
-  find_package(METIS)
-endif()
-
-if(NOT METIS_FOUND)
+if(NOT Scotch_FOUND)
   return()
 endif()
 
-list(APPEND CMAKE_REQUIRED_INCLUDES ${Scotch_INCLUDE_DIRS} ${METIS_INCLUDE_DIRS})
-list(APPEND CMAKE_REQUIRED_LIBRARIES ${Scotch_LIBRARIES} ${METIS_LIBRARIES})
+list(APPEND CMAKE_REQUIRED_INCLUDES ${Scotch_INCLUDE_DIRS})
+list(APPEND CMAKE_REQUIRED_LIBRARIES ${Scotch_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
 
 check_fortran_source_compiles(
 "program test_scotch
-implicit none (type, external)
-external :: mumps_scotch
-call mumps_scotch()
+implicit none
+external :: mumps_scotch_version
+integer :: vers
+call mumps_scotch_version(vers)
 end program"
-MUMPS_HAVE_Scotch
+MUMPS_Scotch_FOUND
 SRC_EXT f90
 )
 
 endfunction(mumps_scotch_check)
 
 
-function(mumps_check)
+function(mumps_metis_check)
 
-if(NOT (MUMPS_LIBRARY AND MUMPS_INCLUDE_DIR))
-  message(STATUS "MUMPS: skip checks as not found")
+find_package(METIS)
+if(NOT METIS_FOUND)
   return()
 endif()
 
+list(APPEND CMAKE_REQUIRED_INCLUDES ${METIS_INCLUDE_DIRS})
+list(APPEND CMAKE_REQUIRED_LIBRARIES ${METIS_LIBRARIES})
 
-find_package(SCALAPACK)
+check_fortran_source_compiles(
+"program test_metis
+implicit none
+external :: mumps_metis_idxsize
+integer :: idxsize
+call mumps_metis_idxsize(idxsize)
+end program"
+MUMPS_METIS_FOUND
+SRC_EXT f90
+)
+
+endfunction(mumps_metis_check)
+
+
+function(mumps_check)
+
+if(NOT (MUMPS_LIBRARY AND MUMPS_INCLUDE_DIR))
+  message(VERBOSE "MUMPS: skip checks as not found")
+  return()
+endif()
+
+if(NOT SCALAPACK_FOUND)
+  find_package(SCALAPACK)
+endif()
+if(NOT SCALAPACK_FOUND)
+  message(VERBOSE "MUMPS: skip checks as SCALAPACK not found")
+  return()
+endif()
 
 if(NOT (MPI_C_FOUND AND MPI_Fortran_FOUND))
   # factory FindMPI re-searches, slowing down configure, especialy when many subprojects use MPI
   find_package(MPI COMPONENTS C Fortran)
 endif()
+if(NOT MPI_FOUND)
+  message(VERBOSE "MUMPS: skip link check as MPI not found")
+  return()
+endif()
 
-find_package(LAPACK)
+if(NOT LAPACK_FOUND)
+  find_package(LAPACK)
+endif()
+if(NOT LAPACK_FOUND)
+  message(VERBOSE "MUMPS: skip link check as LAPACK not found")
+  return()
+endif()
 
-set(CMAKE_REQUIRED_INCLUDES ${MUMPS_INCLUDE_DIR} ${SCALAPACK_INCLUDE_DIRS} ${LAPACK_INCLUDE_DIRS} ${MPI_Fortran_INCLUDE_DIRS} ${MPI_C_INCLUDE_DIRS})
-set(CMAKE_REQUIRED_LIBRARIES ${MUMPS_LIBRARY} ${SCALAPACK_LIBRARIES} ${LAPACK_LIBRARIES} ${MPI_Fortran_LIBRARIES} ${MPI_C_LIBRARIES})
+# some OpenMPI builds need -pthread
+find_package(Threads)
 
-mumps_openmp_check()
+set(CMAKE_REQUIRED_INCLUDES ${MUMPS_INCLUDE_DIR} ${SCALAPACK_INCLUDE_DIRS} ${LAPACK_INCLUDE_DIRS}
+${MPI_Fortran_INCLUDE_DIRS} ${MPI_C_INCLUDE_DIRS}
+)
+set(CMAKE_REQUIRED_LIBRARIES ${MUMPS_LIBRARY} ${SCALAPACK_LIBRARIES} ${LAPACK_LIBRARIES}
+${MPI_Fortran_LIBRARIES} ${MPI_C_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT}
+)
 
-mumps_scotch_check()
+if(OpenMP IN_LIST MUMPS_FIND_COMPONENTS)
+  mumps_openmp_check()
+endif()
 
+if(Scotch IN_LIST MUMPS_FIND_COMPONENTS)
+  mumps_scotch_check()
+endif()
+
+if(METIS IN_LIST MUMPS_FIND_COMPONENTS)
+  mumps_metis_check()
+endif()
 
 foreach(c IN LISTS MUMPS_FIND_COMPONENTS)
   if(NOT c IN_LIST mumps_ariths)
@@ -123,7 +172,7 @@ foreach(c IN LISTS MUMPS_FIND_COMPONENTS)
 
   check_fortran_source_compiles(
   "program test_mumps
-  implicit none (type, external)
+  implicit none
   include '${c}mumps_struc.h'
   external :: ${c}mumps
   type(${c}mumps_struc) :: mumps_par
@@ -217,14 +266,14 @@ if(DEFINED ENV{MKLROOT})
   NO_DEFAULT_PATH
   HINTS ${MUMPS_ROOT} ENV MUMPS_ROOT ${CMAKE_PREFIX_PATH} ENV CMAKE_PREFIX_PATH
   PATH_SUFFIXES lib
-  DOC "simplest MUMPS ordering library"
+  DOC "PORD ordering library"
   )
 else()
   find_library(PORD
   NAMES pord mumps_pord
   NAMES_PER_DIR
   PATH_SUFFIXES openmpi/lib mpich/lib
-  DOC "simplest MUMPS ordering library"
+  DOC "PORD ordering library"
   )
 endif()
 if(NOT PORD)
@@ -232,7 +281,7 @@ if(NOT PORD)
 endif()
 
 foreach(c IN LISTS MUMPS_FIND_COMPONENTS)
-  if(NOT "${c}" IN_LIST mumps_ariths)
+  if(NOT c IN_LIST mumps_ariths)
     continue()
   endif()
 
@@ -266,7 +315,7 @@ endfunction(mumps_libs)
 
 # --- main
 
-# need to have at least one arith precision component
+# need to have at least one precision component
 set(mumps_ariths s d c z)
 
 set(mumps_need_default true)
@@ -301,6 +350,9 @@ if(MUMPS_FOUND)
   # need if _FOUND guard as can't overwrite imported target even if bad
   set(MUMPS_LIBRARIES ${MUMPS_LIBRARY})
   set(MUMPS_INCLUDE_DIRS ${MUMPS_INCLUDE_DIR})
+
+  message(VERBOSE "Mumps libraries: ${MUMPS_LIBRARIES}
+Mumps include directories: ${MUMPS_INCLUDE_DIRS}")
 
   if(NOT TARGET MUMPS::MUMPS)
     add_library(MUMPS::MUMPS INTERFACE IMPORTED)

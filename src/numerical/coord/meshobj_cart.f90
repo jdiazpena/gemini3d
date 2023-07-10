@@ -9,7 +9,8 @@ use spherical, only: er_spherical,etheta_spherical,ephi_spherical
 use geomagnetic, only: geog2geomag,geomag2geog,r2alt,alt2r
 
 implicit none (type, external)
-
+private
+public :: cartmesh
 
 ! type extension for cartmesh
 type, extends(curvmesh) :: cartmesh
@@ -42,6 +43,7 @@ type, extends(curvmesh) :: cartmesh
     procedure, nopass :: calc_h1=>calc_hz
     procedure, nopass :: calc_h2=>calc_hx
     procedure, nopass :: calc_h3=>calc_hy
+    procedure :: native2ECEFspher=>cart2ECEFspher
 
     !> type deallocations, reset flags, etc.
     final :: destructor
@@ -107,42 +109,12 @@ subroutine make_cartmesh(self)
   print '(A,1X,I0,1X,I0,1X,I0)', ' make_cartmesh:  allocating space for grid of size:  ',lzg,lxg,lyg
   lz=lzg-4; lx=lxg-4; ly=lyg-4;
 
-  ! convert the cell centers to spherical ECEF coordinates, then tile for longitude dimension
-  print*, ' make_cartmesh:  converting cell centers to spherical coordinates...'
-  call geog2geomag(self%glonctr,self%glatctr,phictr,thetactr)
-  print*, ' make_cartmesh:  grid center glon,glat,phi,theta',self%glonctr,self%glatctr,phictr,thetactr
-
-  ! radial distance from Earth's center
-  do iy=-1,ly+2
-    do ix=-1,lx+2
-      do iz=-1,lz+2
-        r(iz,ix,iy)=Re+self%z(iz)
-      end do
-    end do
-  end do
-
-  ! northward angular distance
-  do iy=-1,ly+2
-    gamma2=self%y(iy)/Re                  ! must retain sign(y)
-    do ix=-1,lx+2
-      do iz=-1,lz+2
-        theta(iz,ix,iy)=thetactr-gamma2  ! minus because theta is positive south (y runs positive north)
-      end do
-    end do
-  end do
-
-  ! eastward angular distance
-  do iy=-1,ly+2
-    do ix=-1,lx+2
-      gamma1=self%x(ix)/Re/sin(thetactr)
-      do iz=-1,lz+2
-        phispher(iz,ix,iy)=phictr+gamma1
-      end do
-    end do
-  end do
+  call self%native2ECEFspher(self%glonctr,self%glatctr,self%z,self%x,self%y,r,theta,phispher)
 
   ! now assign structure elements and deallocate unneeded temp variables
-  self%r=r(1:lz,1:lx,1:ly); self%theta=theta(1:lz,1:lx,1:ly); self%phi=phispher(1:lz,1:lx,1:ly)   ! don't need ghost cells!
+!  self%r=r(1:lz,1:lx,1:ly); self%theta=theta(1:lz,1:lx,1:ly); self%phi=phispher(1:lz,1:lx,1:ly)   ! don't need ghost cells!
+  self%r=r(-1:lz+2,-1:lx+2,-1:ly+2); self%theta=theta(-1:lz+2,-1:lx+2,-1:ly+2); 
+  self%phi=phispher(-1:lz+2,-1:lx+2,-1:ly+2)
   deallocate(r,theta,phispher)
 
   ! compute the geographic coordinates
@@ -158,20 +130,20 @@ subroutine make_cartmesh(self)
 
   ! q cell interface metric factors
   print*, ' make_cartmesh:  metric factors for cell q-interfaces...'
-  self%hzzi=1._wp
-  self%hxzi=1._wp
-  self%hyzi=1._wp
+  self%hzzi=1
+  self%hxzi=1
+  self%hyzi=1
 
   ! p cell interface metric factors
   print*, ' make_cartmesh:  metric factors for cell p-intefaces...'
-  self%hzxi=1._wp
-  self%hxxi=1._wp
-  self%hyxi=1._wp
+  self%hzxi=1
+  self%hxxi=1
+  self%hyxi=1
 
   print*, ' make_cartmesh:  metric factors for cell phi-interfaces...'
-  self%hzyi=1._wp
-  self%hxyi=1._wp
-  self%hyyi=1._wp
+  self%hzyi=1
+  self%hxyi=1
+  self%hyyi=1
 
   ! spherical ECEF unit vectors (expressed in a Cartesian ECEF basis)
   print*, ' make_cartmesh:  spherical ECEF unit vectors...'
@@ -209,16 +181,74 @@ subroutine make_cartmesh(self)
 end subroutine make_cartmesh
 
 
+!> utility convert native Cartesian coordinates to ECEF spherical
+subroutine cart2ECEFspher(self,glonctr,glatctr,coord1,coord2,coord3,r,theta,phispher)
+  class(cartmesh), intent(in) :: self
+  real(wp) :: glonctr,glatctr
+  real(wp), dimension(:), pointer, intent(in) :: coord1,coord2,coord3
+  real(wp), dimension(lbound(coord1,1):ubound(coord1,1),lbound(coord2,1):ubound(coord2,1),lbound(coord3,1):ubound(coord3,1)), &
+              intent(inout) :: r,theta,phispher
+  real(wp), dimension(:), pointer :: x,y,z
+  integer :: lx,ly,lz,ix,iy,iz
+  integer :: izmin,izmax,ixmin,ixmax,iymin,iymax
+  real(wp) :: thetactr,phictr
+  real(wp) :: gamma1,gamma2
+
+  z=>coord1; x=>coord2; y=>coord3;
+  lz=size(z); lx=size(x); ly=size(y);
+
+  izmin=lbound(z,1); izmax=ubound(z,1);   ! apparently pointers carry lbound/ubound into procedures but arrays don't???
+  ixmin=lbound(x,1); ixmax=ubound(x,1);
+  iymin=lbound(y,1); iymax=ubound(y,1);
+
+  if (lz /= size(r,1) .or. lx /= size(r,2) .or. ly /= size(r,3) ) then
+    print*, lz,lx,ly,size(r,1),size(r,2),size(r,3)
+    error stop 'cartmesh::cart2ECEFspher - r and native coord. arrays not conformable...'
+  end if
+
+  call geog2geomag(glonctr,glatctr,phictr,thetactr)
+
+  ! radial distance from Earth's center
+  do iy=iymin,iymax
+    do ix=ixmin,ixmax
+      do iz=izmin,izmax
+        r(iz,ix,iy)=Re+z(iz)
+      end do
+    end do
+  end do
+
+  ! northward angular distance
+  do iy=iymin,iymax
+    gamma2=y(iy)/Re                  ! must retain sign(y)
+    do ix=ixmin,ixmax
+      do iz=izmin,izmax
+        theta(iz,ix,iy)=thetactr-gamma2  ! minus because theta is positive south (y runs positive north)
+      end do
+    end do
+  end do
+
+  ! eastward angular distance
+  do iy=iymin,iymax
+    do ix=ixmin,ixmax
+      gamma1=x(ix)/Re/sin(thetactr)
+      do iz=izmin,izmax
+        phispher(iz,ix,iy)=phictr+gamma1
+      end do
+    end do
+  end do
+end subroutine cart2ECEFspher
+
+
 !> compute gravitational field components
 subroutine calc_grav_cart(self)
   class(cartmesh), intent(inout) :: self
-  real(wp), dimension(1:self%lx1,1:self%lx2,1:self%lx3) :: gr
-
   ! fixme: error checking?
 
-  self%gz=-Gconst*Me/self%r**2     ! radial component of gravity
-  self%gx=0._wp
-  self%gy=0._wp
+  print*, size(self%r,1),size(self%r,2),size(self%r,3)
+!  self%gz=-Gconst*Me/self%r(1:size(self%r,1)-4,1:size(self%r,2)-4,1:size(self%r,3)-4)**2     ! radial component of gravity
+  self%gz=-Gconst*Me/self%r(1:self%lx1,1:self%lx2,1:self%lx3)**2     ! radial component of gravity
+  self%gx=0
+  self%gy=0
 end subroutine calc_grav_cart
 
 
@@ -240,79 +270,98 @@ subroutine calc_inclination_cart(self)
 
   ! fixme: error checking
 
-  self%I=90._wp
+  self%I=90
 end subroutine calc_inclination_cart
 
 
 !> compute metric factors for q
 function calc_hz(coord1,coord2,coord3) result(hval)
+  !! FIXME: add error checking
   real(wp), dimension(:,:,:), pointer, intent(in) :: coord1,coord2,coord3
   real(wp), dimension(lbound(coord1,1):ubound(coord1,1),lbound(coord1,2):ubound(coord1,2), &
                       lbound(coord1,3):ubound(coord1,3)) :: hval
   real(wp), dimension(:,:,:), pointer :: r,theta,phi
 
-  ! fixme: error checking
+
+  logical :: a
+  a = associated(coord2)
+  !! avoid unused variable warning
 
   r=>coord1; theta=>coord1; phi=>coord3;
-  hval=1._wp
+  hval=1
 end function calc_hz
 
 
 !> compute p metric factors
 function calc_hx(coord1,coord2,coord3) result(hval)
+  !! FIXME: add error checking
   real(wp), dimension(:,:,:), pointer, intent(in) :: coord1,coord2,coord3
   real(wp), dimension(lbound(coord1,1):ubound(coord1,1),lbound(coord1,2):ubound(coord1,2), &
                       lbound(coord1,3):ubound(coord1,3)) :: hval
   real(wp), dimension(:,:,:), pointer :: r,theta,phi
 
-  ! fixme: error checkign
+  logical :: a
+  a = associated(coord2)
+  !! avoid unused variable warning
 
   r=>coord1; theta=>coord1; phi=>coord3;
-  hval=1._wp
+  hval=1
 end function calc_hx
 
 
 !> compute phi metric factor
 function calc_hy(coord1,coord2,coord3) result(hval)
+  !! FIXME: add error checking
   real(wp), dimension(:,:,:), pointer, intent(in) :: coord1,coord2,coord3
   real(wp), dimension(lbound(coord1,1):ubound(coord1,1),lbound(coord1,2):ubound(coord1,2), &
                       lbound(coord1,3):ubound(coord1,3)) :: hval
   real(wp), dimension(:,:,:), pointer :: r,theta,phi
 
-  ! fixme: error checking
+  logical :: a
+  a = associated(coord2)
+  !! avoid unused variable warning
 
   r=>coord1; theta=>coord1; phi=>coord3;
-  hval=1._wp
+  hval=1
 end function calc_hy
 
 
 !> radial unit vector (expressed in ECEF cartesian coodinates, components permuted as ix,iy,iz)
 subroutine calc_er_spher(self)
   class(cartmesh), intent(inout) :: self
+  integer :: lx1,lx2,lx3
+
+  lx1=self%lx1; lx2=self%lx2; lx3=self%lx3;
 
   ! fixme: error checking
 
-  self%er=er_spherical(self%theta,self%phi)
+  self%er=er_spherical(self%theta(1:lx1,1:lx2,1:lx3),self%phi(1:lx1,1:lx2,1:lx3))
 end subroutine calc_er_spher
 
 
 !> zenith angle unit vector (expressed in ECEF cartesian coodinates
 subroutine calc_etheta_spher(self)
   class(cartmesh), intent(inout) :: self
+  integer :: lx1,lx2,lx3
+
+  lx1=self%lx1; lx2=self%lx2; lx3=self%lx3;
 
   ! fixme: error checking
 
-  self%etheta=etheta_spherical(self%theta,self%phi)
+  self%etheta=etheta_spherical(self%theta(1:lx1,1:lx2,1:lx3),self%phi(1:lx1,1:lx2,1:lx3))
 end subroutine calc_etheta_spher
 
 
 !> azimuth angle unit vector (ECEF cart.)
 subroutine calc_ephi_spher(self)
   class(cartmesh), intent(inout) :: self
+  integer :: lx1,lx2,lx3
+
+  lx1=self%lx1; lx2=self%lx2; lx3=self%lx3;
 
   ! fixme: error checking
 
-  self%ephi=ephi_spherical(self%theta,self%phi)
+  self%ephi=ephi_spherical(self%theta(1:lx1,1:lx2,1:lx3),self%phi(1:lx1,1:lx2,1:lx3))
 end subroutine calc_ephi_spher
 
 

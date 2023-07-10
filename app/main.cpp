@@ -3,13 +3,11 @@
 #include <iostream>
 #include <vector>
 #include <sstream>
+#include <cstring>
 
 #if __has_include(<filesystem>)
 #include <filesystem>
 namespace fs = std::filesystem;
-#elif __has_include(<experimental/filesystem>)
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
 #else
 #error "No C++ filesystem support"
 #endif
@@ -18,7 +16,7 @@ namespace fs = std::experimental::filesystem;
 
 #include "gemini3d.h"
 #include "iniparser.h"
-#include "filesystem.h"
+#include "ffilesystem.h"
 
 int main(int argc, char **argv) {
 
@@ -41,7 +39,7 @@ int main(int argc, char **argv) {
 
   // simulation directory
   char odir[4096];
-  expanduser(argv[1], odir);
+  fs_expanduser(argv[1], odir, 4096);
   fs::path out_dir(odir);
 
   if(! fs::is_directory(out_dir)) {
@@ -85,7 +83,7 @@ int main(int argc, char **argv) {
   }
 
   // Prepare Gemini3D struct
-  strncpy(s.out_dir, out_dir.string().c_str(), LMAX);
+  std::strcpy(s.out_dir, out_dir.generic_string().c_str());
 
   s.fortran_cli = false;
   s.debug = false;

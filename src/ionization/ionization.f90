@@ -10,7 +10,7 @@ use timeutils, only: ymd2doy
 implicit none (type, external)
 private
 public :: ionrate_fang, ionrate_glow98, eheating, photoionization
-external :: mpi_send, mpi_recv
+
 
 interface
   module subroutine glow_run(W0,PhiWmWm2,date_doy,UTsec,xf107,xf107a,xlat,xlon,alt,nn,Tn,ns,Ts,&
@@ -46,7 +46,7 @@ integer :: il,isp
 real(wp), dimension(ll) :: lambda1,lambda2,fref,Aeuv,sigmaO,sigmaN2,sigmaO2
 real(wp), dimension(ll) :: brN2i,brN2di,brO2i,brO2di,pepiO,pepiN2i,pepiN2di,pepiO2i,pepiO2di
 real(wp), dimension(ll) :: Iinf
-real(wp), dimension(size(nn,1),size(nn,2),size(nn,3)) :: g,bigX,y,Chfn
+real(wp), dimension(size(nn,1),size(nn,2),size(nn,3)) :: bigX,y,Chfn
 real(wp), dimension(size(nn,1),size(nn,2),size(nn,3)) :: nOcol,nN2col,nO2col
 real(wp), dimension(size(nn,1),size(nn,2),size(nn,3)) :: phototmp
 real(wp) :: H
@@ -112,7 +112,7 @@ Iinf=fref*(1 + Aeuv*(0.5_wp*(f107+f107a)-80._wp))
 
 !O COLUMN DENSITY
 H=kB*Tninf/mn(1)/gavg      !scalar scale height
-bigX=(x%alt+Re)/H          !a reduced altitude
+bigX=(x%alt(1:lx1,1:lx2,1:lx3)+Re)/H          !a reduced altitude
 y=sqrt(bigX/2._wp)*abs(cos(chi))
 Chfn=0
 where (chi<pi/2._wp)    !where does work with array corresponding elements provided they are conformable (e.g. bigX and y in this case)
@@ -126,7 +126,7 @@ nOcol=nn(:,:,:,1)*H*Chfn
 
 !N2 COLUMN DENSITY
 H=kB*Tninf/mn(2)/gavg     !all of these temp quantities need to be recomputed for eacb neutral species being ionized
-bigX=(x%alt+Re)/H
+bigX=(x%alt(1:lx1,1:lx2,1:lx3)+Re)/H
 y=sqrt(bigX/2._wp)*abs(cos(chi))
 Chfn=0
 where (chi<pi/2._wp)
@@ -139,7 +139,7 @@ nN2col=nn(:,:,:,2)*H*Chfn
 
 !O2 COLUMN DENSITY
 H=kB*Tninf/mn(3)/gavg
-bigX=(x%alt+Re)/H
+bigX=(x%alt(1:lx1,1:lx2,1:lx3)+Re)/H
 y=sqrt(bigX/2._wp)*abs(cos(chi))
 Chfn=0
 where (chi<pi/2._wp)    !where does work with array corresponding elements provided they are conformable
@@ -207,10 +207,10 @@ end do
 end function photoionization
 
 
-pure function ionrate_fang(W0, PhiWmWm2, alt, nn, Tn, flag_fang, g1)
+pure function ionrate_fang(W0, PhiWmWm2, nn, Tn, flag_fang, g1)
 real(wp), dimension(:,:), intent(in) :: W0,PhiWmWm2
 real(wp), dimension(:,:,:,:), intent(in) :: nn
-real(wp), dimension(:,:,:), intent(in) :: alt,Tn
+real(wp), dimension(:,:,:), intent(in) :: Tn
 integer, intent(in) :: flag_fang
 real(wp), dimension(:,:,:), intent(in) :: g1
 real(wp) :: W0keV,PhiW
@@ -286,7 +286,7 @@ end if
 end function ionrate_fang
 
 
-pure function eheating(nn,Tn,ionrate,ns)
+pure function eheating(nn,ionrate,ns)
 
 !------------------------------------------------------------
 !-------COMPUTE SWARTZ AND NISBET, (1973) ELECTRON HEATING RATES.
@@ -295,7 +295,6 @@ pure function eheating(nn,Tn,ionrate,ns)
 !------------------------------------------------------------
 
 real(wp), dimension(:,:,:,:), intent(in) :: nn
-real(wp), dimension(:,:,:), intent(in) :: Tn
 real(wp), dimension(1:size(nn,1),1:size(nn,2),1:size(nn,3),lsp-1), intent(in) :: ionrate
 real(wp), dimension(-1:,-1:,-1:,:), intent(in) :: ns    !includes ghost cells
 

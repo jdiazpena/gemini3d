@@ -24,6 +24,13 @@ const gemini3d_config meshobj interp timeutils neutraldata inputdata reader
 h5fortran::h5fortran
 )
 
+#add_library(neutraldata2Daxisymm_fclaw OBJECT neutraldata2Daxisymmobj_fclaw.f90
+#$<TARGET_OBJECTS:grid>
+#)
+#target_link_libraries(neutraldata2Daxisymm_fclaw PRIVATE 
+#const gemini3d_config meshobj interp timeutils neutraldata neutraldata2D inputdata
+#)
+
 add_library(neutraldata2Daxisymm OBJECT neutraldata2Daxisymmobj.f90
 $<TARGET_OBJECTS:grid>
 )
@@ -31,7 +38,6 @@ target_link_libraries(neutraldata2Daxisymm PRIVATE
 const gemini3d_config meshobj interp timeutils neutraldata neutraldata2D inputdata reader
 h5fortran::h5fortran
 )
-target_compile_options(neutraldata2Daxisymm PRIVATE ${gfortran_opts})
 
 add_library(neutraldata2Dcart OBJECT neutraldata2Dcartobj.f90
 $<TARGET_OBJECTS:grid>
@@ -40,31 +46,55 @@ target_link_libraries(neutraldata2Dcart PRIVATE
 const gemini3d_config meshobj interp timeutils neutraldata neutraldata2D inputdata reader
 h5fortran::h5fortran
 )
-target_compile_options(neutraldata2Dcart PRIVATE ${gfortran_opts})
+
+add_library(neutraldata3D OBJECT neutraldata3Dobj.f90
+$<TARGET_OBJECTS:grid>
+)
+target_link_libraries(neutraldata3D PRIVATE 
+const gemini3d_config meshobj interp timeutils neutraldata inputdata reader
+)
+
+add_library(neutraldata3D_fclaw OBJECT neutraldata3Dobj_fclaw.f90
+$<TARGET_OBJECTS:grid>
+)
+target_link_libraries(neutraldata3D_fclaw PRIVATE 
+const gemini3d_config meshobj interp timeutils neutraldata neutraldata3D inputdata
+)
+
+add_library(neutraldata3D_fclaw_axisymm OBJECT neutraldata3Dobj_fclaw_axisymm.f90
+$<TARGET_OBJECTS:grid>
+)
+target_link_libraries(neutraldata3D_fclaw_axisymm PRIVATE 
+const gemini3d_config meshobj interp timeutils neutraldata neutraldata3D neutraldata3D_fclaw inputdata
+)
+
+add_library(neutraldata3D_fclaw_3Dx OBJECT neutraldata3Dobj_fclaw_3Dx.f90
+$<TARGET_OBJECTS:grid>
+)
+target_link_libraries(neutraldata3D_fclaw_3Dx PRIVATE 
+const gemini3d_config meshobj interp timeutils neutraldata neutraldata3D neutraldata3D_fclaw inputdata
+)
 
 add_library(neutraldata3D_mpi OBJECT neutraldata3Dobj_mpi.f90 neuslab_mpi.f90
 $<TARGET_OBJECTS:grid>
 )
 target_link_libraries(neutraldata3D_mpi PRIVATE
-const gemini3d_config meshobj interp timeutils neutraldata inputdata reader
+const gemini3d_config meshobj interp timeutils neutraldata neutraldata3D inputdata reader
 h5fortran::h5fortran MPI::MPI_Fortran
 )
-target_compile_options(neutraldata3D_mpi PRIVATE ${gfortran_opts})
 
 add_library(neutraldata3D_geom_mpi OBJECT neutraldata3Dobj_geom_mpi.f90
 $<TARGET_OBJECTS:grid>
 )
 target_link_libraries(neutraldata3D_geom_mpi PRIVATE
-const gemini3d_config meshobj interp timeutils neutraldata neutraldata3D_mpi inputdata reader
+const gemini3d_config meshobj interp timeutils neutraldata neutraldata3D neutraldata3D_mpi inputdata reader geomagnetic
 h5fortran::h5fortran MPI::MPI_Fortran
 )
-target_compile_options(neutraldata3D_geom_mpi PRIVATE ${gfortran_opts})
 
 add_library(neutraldata3D_geog_mpi OBJECT neutraldata3Dobj_geog_mpi.f90
 $<TARGET_OBJECTS:grid>
 )
 target_link_libraries(neutraldata3D_geog_mpi PRIVATE
-const gemini3d_config meshobj interp timeutils neutraldata neutraldata3D_mpi inputdata reader
+const gemini3d_config meshobj interp timeutils neutraldata neutraldata3D neutraldata3D_mpi inputdata reader
 h5fortran::h5fortran MPI::MPI_Fortran
 )
-target_compile_options(neutraldata3D_geog_mpi PRIVATE ${gfortran_opts})

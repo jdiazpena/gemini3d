@@ -11,7 +11,8 @@ use newton, only: newtopts,newton_exact,objfun,objfun_deriv
 use spherical, only: er_spherical,etheta_spherical,ephi_spherical
 
 implicit none (type, external)
-
+private
+public :: dipolemesh, qp2rtheta
 
 ! type extension for dipolemesh
 type, extends(curvmesh) :: dipolemesh
@@ -47,6 +48,7 @@ type, extends(curvmesh) :: dipolemesh
     procedure, nopass :: calc_h1=>calc_hq
     procedure, nopass :: calc_h2=>calc_hp
     procedure, nopass :: calc_h3=>calc_hphi_dip
+    procedure :: native2ECEFspher=>dipole2ECEFspher
 
     !> type deallocations, etc.
     final :: destructor
@@ -114,7 +116,7 @@ subroutine make_dipolemesh(self)
   class(dipolemesh), intent(inout) :: self
 
   integer :: lqg,lpg,lphig,lq,lp,lphi
-  integer :: iq,ip,iphi
+  integer :: iphi
   real(wp), dimension(:,:,:), pointer :: r,theta,phispher     ! so these can serve as targets
   real(wp), dimension(:,:,:), pointer :: rqint,thetaqint,phiqint
   real(wp), dimension(:,:,:), pointer :: rpint,thetapint,phipint
@@ -136,35 +138,22 @@ subroutine make_dipolemesh(self)
 ! array sizes without ghost cells for convenience
   print "(A,1X,I0,1X,I0,1X,I0)", 'make_dipolemesh:  allocating space for grid of size:',lqg,lpg,lphig
   lq=lqg-4; lp=lpg-4; lphi=lphig-4;
-  allocate(rqint(1:lq+1,1:lp,1:lphi),thetaqint(1:lq+1,1:lp,1:lphi))    ! these are just temp vars. needed to compute metric factors
-  allocate(rpint(1:lq,1:lp+1,1:lphi),thetapint(1:lq,1:lp+1,1:lphi))
+  allocate(rqint(1:lq+1,1:lp,1:lphi))    ! these are just temp vars. needed to compute metric factors
+  allocate(thetaqint,phiqint, mold=rqint)
+  allocate(rpint(1:lq,1:lp+1,1:lphi))
+  allocate(thetapint,phipint, mold=rpint)
 
   ! convert the cell centers to spherical ECEF coordinates, then tile for longitude dimension
   print*, 'make_dipolemesh:  converting cell centers to spherical coordinates...'
-  call self%calc_rtheta_2D(self%q,self%p,r(:,:,-1),theta(:,:,-1))
-  do iphi=0,lphig-2     ! tile
-    r(:,:,iphi)=r(:,:,-1)
-    theta(:,:,iphi)=theta(:,:,-1)
-  end do
-  do iphi=-1,lphig-2
-    phispher(:,:,iphi)=self%phidip(iphi)   !scalar assignment should work...
-  end do
+  call self%native2ECEFspher(self%glonctr,self%glatctr,self%q,self%p,self%phidip,r,theta,phispher)
 
   ! locations of the cell interfaces in q-dimension (along field lines)
   print*, 'make_dipolemesh:  converting cell interfaces in q...'
-  call self%calc_rtheta_2D(self%qint,self%p(1:lp),rqint(:,:,1),thetaqint(:,:,1))
-  do iphi=2,lphi
-    rqint(:,:,iphi)=rqint(:,:,1)
-    thetaqint(:,:,iphi)=thetaqint(:,:,1)
-  end do
+  call self%native2ECEFspher(self%glonctr,self%glatctr,self%qint,self%p(1:lp),self%phidip(1:lphi),rqint,thetaqint,phiqint)
 
   ! locations of cell interfaces in p-dimesion (along constant L-shell)
   print*, 'make_dipolemesh:  converting cell interfaces in p...'
-  call self%calc_rtheta_2D(self%q(1:lq),self%pint,rpint(:,:,1),thetapint(:,:,1))
-  do iphi=2,lphi
-    rpint(:,:,iphi)=rpint(:,:,1)
-    thetapint(:,:,iphi)=thetapint(:,:,1)
-  end do
+  call self%native2ECEFspher(self%glonctr,self%glatctr,self%q(1:lq),self%pint,self%phidip(1:lphi),rpint,thetapint,phipint)
 
   ! compute and store the metric factors; these need to include ghost cells
   print*, 'make_dipolemesh:  metric factors for cell centers...'
@@ -173,7 +162,9 @@ subroutine make_dipolemesh(self)
   self%hphi(-1:lq+2,-1:lp+2,-1:lphi+2)=self%calc_h3(r,theta,phispher)
 
   ! now assign structure elements and deallocate unneeded temp variables
-  self%r=r(1:lq,1:lp,1:lphi); self%theta=theta(1:lq,1:lp,1:lphi); self%phi=phispher(1:lq,1:lp,1:lphi)   ! don't need ghost cells!
+  !self%r=r(1:lq,1:lp,1:lphi); self%theta=theta(1:lq,1:lp,1:lphi); self%phi=phispher(1:lq,1:lp,1:lphi)   ! don't need ghost cells!
+  self%r=r(-1:lq+2,-1:lp+2,-1:lphi+2); self%theta=theta(-1:lq+2,-1:lp+2,-1:lphi+2);    ! keep ghost cells!
+  self%phi=phispher(-1:lq+2,-1:lp+2,-1:lphi+2)
 
   ! compute the geographic coordinates
   print*, 'make_dipolemesh:  geographic coordinates from magnetic...'
@@ -240,15 +231,48 @@ subroutine make_dipolemesh(self)
 end subroutine make_dipolemesh
 
 
+!> convert input dipole coordinates into ECEF spherical coordinates
+subroutine dipole2ECEFspher(self,glonctr,glatctr,coord1,coord2,coord3,r,theta,phispher)
+  class(dipolemesh), intent(in) :: self
+  real(wp) :: glonctr,glatctr     ! unused in this implementation
+  real(wp), dimension(:), pointer, intent(in) :: coord1,coord2,coord3
+  !real(wp), dimension(:,:,:), intent(inout) :: r,theta,phispher
+  real(wp), dimension(lbound(coord1,1):ubound(coord1,1),lbound(coord2,1):ubound(coord2,1),lbound(coord3,1):ubound(coord3,1)), &
+              intent(inout) :: r,theta,phispher
+  integer :: lq,lp,lphi,iphi,iphimin,iphimax
+  real(wp), dimension(:), pointer :: q,p,phidip
+
+  q=>coord1; p=>coord2; phidip=>coord3;
+  lq=size(q); lp=size(p); lphi=size(phidip);
+  iphimin=lbound(phidip,1); iphimax=ubound(phidip,1);
+
+  if (lq /= size(r,1) .or. lp /= size(r,2) .or. lphi /= size(r,3) ) then
+    print*, lq,lp,lphi,size(r,1),size(r,2),size(r,3)
+    error stop 'dipolemesh::dipole2ECEFspher - r and native coord. arrays not conformable...'
+  end if
+
+  call self%calc_rtheta_2D(q,p,r(:,:,iphimin),theta(:,:,iphimin))
+  do iphi=iphimin+1,iphimax     ! tile
+    r(:,:,iphi)=r(:,:,iphimin)
+    theta(:,:,iphi)=theta(:,:,iphimin)
+  end do
+  do iphi=iphimin,iphimax
+    phispher(:,:,iphi)=phidip(iphi)   !scalar assignment should work...
+  end do
+end subroutine dipole2ECEFspher
+
+
 subroutine calc_grav_dipole(self)
 !! compute gravitational field components
   class(dipolemesh), intent(inout) :: self
-
   real(wp), dimension(1:self%lx1, 1:self%lx2, 1:self%lx3) :: gr
+  integer :: lx1,lx2,lx3
+
+  lx1=self%lx1; lx2=self%lx2; lx3=self%lx3;
 
   if(any(shape(gr) < 1)) error stop "meshobj_dipole:calc_grav_dipole: lx1,lx2,lx3 must be strictly positive"
 
-  gr = -Gconst*Me / self%r**2
+  gr = -Gconst*Me / self%r(1:lx1,1:lx2,1:lx3)**2
   !! radial component of gravity
   self%gq = gr*sum(self%er*self%eq, dim=4)
   self%gp = gr*sum(self%er*self%ep, dim=4)
@@ -261,10 +285,13 @@ end subroutine calc_grav_dipole
 !> compute the magnetic field strength
 subroutine calc_Bmag_dipole(self)
   class(dipolemesh), intent(inout) :: self
+  integer :: lx1,lx2,lx3
+
+  lx1=self%lx1; lx2=self%lx2; lx3=self%lx3;
 
   ! fixme: error checking
 
-  self%Bmag=mu0*Mmag/4/pi/self%r**3*sqrt(3*cos(self%theta)**2+1)
+  self%Bmag=mu0*Mmag/4/pi/self%r(1:lx1,1:lx2,1:lx3)**3*sqrt(3*cos(self%theta(1:lx1,1:lx2,1:lx3))**2+1)
 end subroutine calc_Bmag_dipole
 
 
@@ -301,7 +328,7 @@ function calc_hq(coord1,coord2,coord3) result(hval)
 
   ! fixme: error checking
   r=>coord1; theta=>coord2; phi=>coord3;
-  hval=r**3/Re**2/(sqrt(1+3*cos(theta)**2))
+  hval=r**3/Re**2/sqrt(1+3*cos(theta)**2)
 end function calc_hq
 
 
@@ -315,7 +342,7 @@ function calc_hp(coord1,coord2,coord3) result(hval)
   ! fixme: error checkign
 
   r=>coord1; theta=>coord2; phi=>coord3;
-  hval=Re*sin(theta)**3/(sqrt(1+3*cos(theta)**2))
+  hval=Re*sin(theta)**3/sqrt(1+3*cos(theta)**2)
 end function calc_hp
 
 
@@ -336,30 +363,39 @@ end function calc_hphi_dip
 !> radial unit vector (expressed in ECEF cartesian coodinates, components permuted as ix,iy,iz)
 subroutine calc_er_spher(self)
   class(dipolemesh), intent(inout) :: self
+  integer :: lx1,lx2,lx3
+
+  lx1=self%lx1; lx2=self%lx2; lx3=self%lx3;
 
   ! fixme: error checking
 
-  self%er=er_spherical(self%theta,self%phi)
+  self%er=er_spherical(self%theta(1:lx1,1:lx2,1:lx3),self%phi(1:lx1,1:lx2,1:lx3))
 end subroutine calc_er_spher
 
 
 !> zenith angle unit vector (expressed in ECEF cartesian coodinates
 subroutine calc_etheta_spher(self)
   class(dipolemesh), intent(inout) :: self
+  integer :: lx1,lx2,lx3
+
+  lx1=self%lx1; lx2=self%lx2; lx3=self%lx3;
 
   ! fixme: error checking
 
-  self%etheta=etheta_spherical(self%theta,self%phi)
+  self%etheta=etheta_spherical(self%theta(1:lx1,1:lx2,1:lx3),self%phi(1:lx1,1:lx2,1:lx3))
 end subroutine calc_etheta_spher
 
 
 !> azimuth angle unit vector (ECEF cart.)
 subroutine calc_ephi_spher(self)
   class(dipolemesh), intent(inout) :: self
+  integer :: lx1,lx2,lx3
+
+  lx1=self%lx1; lx2=self%lx2; lx3=self%lx3;
 
   ! fixme: error checking
 
-  self%ephi=ephi_spherical(self%theta,self%phi)
+  self%ephi=ephi_spherical(self%theta(1:lx1,1:lx2,1:lx3),self%phi(1:lx1,1:lx2,1:lx3))
 end subroutine calc_ephi_spher
 
 
@@ -367,13 +403,18 @@ end subroutine calc_ephi_spher
 subroutine calc_eq(self)
   class(dipolemesh), intent(inout) :: self
   real(wp), dimension(1:self%lx1,1:self%lx2,1:self%lx3) :: denom
+  integer :: lx1,lx2,lx3
+
+  lx1=self%lx1; lx2=self%lx2; lx3=self%lx3;
 
   ! fixme: error checking
 
-  denom=sqrt(1+3*cos(self%theta)**2)
-  self%eq(:,:,:,1)=-3*cos(self%theta)*sin(self%theta)*cos(self%phi)/denom
-  self%eq(:,:,:,2)=-3*cos(self%theta)*sin(self%theta)*sin(self%phi)/denom
-  self%eq(:,:,:,3)=(1-3*cos(self%theta)**2)/denom   !simplify?
+  denom=sqrt(1+3*cos(self%theta(1:lx1,1:lx2,1:lx3))**2)
+  self%eq(:,:,:,1)=-3*cos(self%theta(1:lx1,1:lx2,1:lx3))*sin(self%theta(1:lx1,1:lx2,1:lx3))* &
+                        cos(self%phi(1:lx1,1:lx2,1:lx3))/denom
+  self%eq(:,:,:,2)=-3*cos(self%theta(1:lx1,1:lx2,1:lx3))*sin(self%theta(1:lx1,1:lx2,1:lx3))* &
+                        sin(self%phi(1:lx1,1:lx2,1:lx3))/denom
+  self%eq(:,:,:,3)=(1-3*cos(self%theta(1:lx1,1:lx2,1:lx3))**2)/denom   !simplify?
 end subroutine calc_eq
 
 
@@ -381,13 +422,16 @@ end subroutine calc_eq
 subroutine calc_ep(self)
   class(dipolemesh), intent(inout) :: self
   real(wp), dimension(1:self%lx1,1:self%lx2,1:self%lx3) :: denom
+  integer :: lx1,lx2,lx3
+
+  lx1=self%lx1; lx2=self%lx2; lx3=self%lx3;
 
   ! fixme: error checking
 
-  denom=sqrt(1+3*cos(self%theta)**2)
-  self%ep(:,:,:,1)=(1-3*cos(self%theta)**2)*cos(self%phi)/denom
-  self%ep(:,:,:,2)=(1-3*cos(self%theta)**2)*sin(self%phi)/denom
-  self%ep(:,:,:,3)=3*cos(self%theta)*sin(self%theta)/denom
+  denom=sqrt(1+3*cos(self%theta(1:lx1,1:lx2,1:lx3))**2)
+  self%ep(:,:,:,1)=(1-3*cos(self%theta(1:lx1,1:lx2,1:lx3))**2)*cos(self%phi(1:lx1,1:lx2,1:lx3))/denom
+  self%ep(:,:,:,2)=(1-3*cos(self%theta(1:lx1,1:lx2,1:lx3))**2)*sin(self%phi(1:lx1,1:lx2,1:lx3))/denom
+  self%ep(:,:,:,3)=3*cos(self%theta(1:lx1,1:lx2,1:lx3))*sin(self%theta(1:lx1,1:lx2,1:lx3))/denom
 end subroutine calc_ep
 
 
@@ -405,12 +449,15 @@ end subroutine calc_ephi_dip
 !   this should be agnostic to the array start index; here just remap as 1:size(array,1), etc.
 !   though the dummy argument declarations.  This is necessary due to the way that
 subroutine calc_rtheta_2D(self,q,p,r,theta)
-  class(dipolemesh) :: self
+  class(dipolemesh), intent(in) :: self
   real(wp), dimension(:), intent(in) :: q
   real(wp), dimension(:), intent(in) :: p
   real(wp), dimension(:,:), intent(inout) :: r,theta
 
   integer :: iq,ip,lq,lp
+
+  lq = size(self%q)
+  !! avoid unused argument warning
 
   lq=size(q,1); lp=size(p,1);
 
@@ -424,11 +471,14 @@ end subroutine calc_rtheta_2D
 
 !> convert a set of r,theta points (2D arrays) to 2D arrays of q,p
 subroutine calc_qp_2D(self,r,theta,q,p)
-  class(dipolemesh) :: self
+  class(dipolemesh), intent(in) :: self
   real(wp), dimension(:,:), intent(in) :: r,theta
   real(wp), dimension(:,:), intent(inout) :: q,p
 
   integer :: i1,i2,ldim1,ldim2
+
+  ldim1 = size(self%r)
+  !! avoid unused argument warning
 
   ldim1=size(r,1); ldim2=size(r,2);
 
@@ -442,7 +492,7 @@ end subroutine calc_qp_2D
 
 !> type destructor; written generally, viz. as if it is possible some grid pieces are allocated an others are not
 subroutine destructor(self)
-  type(dipolemesh) :: self
+  type(dipolemesh), intent(inout) :: self
 
   call self%dissociate_pointers()
   print*, '  dipolemesh destructor completed successfully'

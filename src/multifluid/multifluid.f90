@@ -34,7 +34,7 @@ use precipdataobj, only: precipdata
 implicit none (type, external)
 private
 public :: sweep3_allparams,sweep1_allparams,sweep2_allparams,source_loss_allparams,VNRicht_artvisc,compression, &
-            energy_diffusion,impact_ionization,clean_param,rhoe2T,T2rhoe,rhov12v1,v12rhov1
+            energy_diffusion,impact_ionization,clean_param,rhoe2T,T2rhoe,rhov12v1,v12rhov1,clean_param_after_regrid
 
 integer, parameter :: lprec=2
 !! number of precipitating electron populations
@@ -42,6 +42,7 @@ real(wp), allocatable, dimension(:,:,:,:) :: PrPrecipG
 real(wp), allocatable, dimension(:,:,:) :: QePrecipG, iverG
 
 real(wp), parameter :: xicon = 3
+!real(wp), parameter :: xicon = 0
 !! artificial viscosity, decent value for closed field-line grids extending to high altitudes, can be set to 0 for cartesian simulations not exceed altitudes of 1500 km.
 
 contains
@@ -51,10 +52,31 @@ subroutine sweep3_allparams(dt,x,vs3i,ns,rhovs1,rhoes)
   class(curvmesh), intent(in) :: x
   real(wp), dimension(:,:,:,:), intent(in) :: vs3i
   real(wp), dimension(-1:,-1:,-1:,:), intent(inout) :: ns,rhovs1,rhoes
+!  if (minval(rhoes) < 0) then
+!    print*, '1 rhoes data trashed:  ',minval(rhoes),maxval(rhoes),minloc(rhoes),maxloc(rhoes)
+!    print*, 'vs3i:  ',minval(vs3i),maxval(vs3i),minloc(vs3i),maxloc(vs3i)
+!    print*, 'ns:  ',minval(ns),maxval(ns),minloc(ns),maxloc(ns)
+!    open(newunit=funit,file='error.dat',status='replace',access='stream')
+!    write(funit) ns
+!    write(funit) vs3i
+!    close(funit)
+!    error stop
+!  end if
 
   call sweep3_allspec(ns,vs3i,dt,x,0,6)
   call sweep3_allspec(rhovs1,vs3i,dt,x,1,6)
   call sweep3_allspec(rhoes,vs3i,dt,x,0,7)
+
+!  if (minval(rhoes) < 0) then
+!    print*, '2 rhoes data trashed:  ',minval(rhoes),maxval(rhoes),minloc(rhoes),maxloc(rhoes)
+!    print*, 'vs3i:  ',minval(vs3i),maxval(vs3i),minloc(vs3i),maxloc(vs3i)
+!    print*, 'ns:  ',minval(ns),maxval(ns),minloc(ns),maxloc(ns)
+!    open(newunit=funit,file='error.dat',status='replace',access='stream')
+!    write(funit) ns
+!    write(funit) vs3i
+!    close(funit)
+!    error stop
+!  end if
 end subroutine sweep3_allparams
 
 
@@ -107,15 +129,17 @@ subroutine source_loss_allparams(dt,t,cfg,ymd,UTsec,x,E1,Q,f107a,f107,nn,vn1,vn2
   real(wp), dimension(1:size(ns,1)-4,1:size(ns,2)-4,1:size(ns,3)-4,size(ns,4)-1) :: Prprecip
   real(wp), dimension(1:size(ns,1)-4,1:size(ns,2)-4,1:size(ns,3)-4) :: Qeprecip
   real(wp), dimension(1:size(ns,2)-4,1:size(ns,3)-4,lprec) :: W0,PhiWmWm2
-  integer :: iprec
   real(wp) :: tstart,tfin
+
+  !print*, 'Begin src/loss:  ',minval(E1),maxval(E1)
+
 
   !> Establish top boundary conditions for electron precipitation
   if (cfg%flagprecfile==1) then
     call precipBCs_fileinput(dt,t,cfg,ymd,UTsec,x,W0,PhiWmWm2,eprecip)
   else
     !! no file input specified, so just call 'regular' function
-    call precipBCs(t,x,cfg,W0,PhiWmWm2)
+    call precipBCs(cfg,W0,PhiWmWm2)
   end if
 
   ! Stiff/balanced energy source, i.e. source/losses for energy equation(s)
@@ -130,6 +154,8 @@ subroutine source_loss_allparams(dt,t,cfg,ymd,UTsec,x,E1,Q,f107a,f107,nn,vn1,vn2
   !if (mpi_cfg%myid==0 .and. debug) then
   !  print *, 'Energy sources substep for time step:  ',t,'done in cpu_time of:  ',tfin-tstart
   !end if
+
+  !print*, 'After energy substep:  ',minval(E1),maxval(E1)
 
   !ALL VELOCITY SOURCES
   call cpu_time(tstart)
@@ -220,21 +246,33 @@ subroutine VNRicht_artvisc(ns,vs1,Q)
   integer :: isp,lsp
 
   lsp=size(ns,4)
-  !ARTIFICIAL VISCOSITY (NOT REALLY NEED BELOW 1000 KM ALT.).  NOTE THAT WE DON'T CHECK WHERE SUBCYCLING IS NEEDED SINCE, IN MY EXPERIENCE THEN CODE IS BOMBING ANYTIME IT IS...
-  ! Interestingly, this is accessing ghost cells of velocity so if they are overwritten by clean_params this viscosity calculation would generate "odd" results
-  do isp=1,lsp-1
-    v1iupdate(1:lx1+1,:,:)=0.5_wp*(vs1(0:lx1,1:lx2,1:lx3,isp)+vs1(1:lx1+1,1:lx2,1:lx3,isp))    !compute an updated interface velocity (only in x1-direction)
-    dv1iupdate=v1iupdate(2:lx1+1,:,:)-v1iupdate(1:lx1,:,:)
-    Q(:,:,:,isp)=ns(1:lx1,1:lx2,1:lx3,isp)*ms(isp)*0.25_wp*xicon**2*(min(dv1iupdate,0._wp))**2   !note that viscosity does not have/need ghost cells
-  end do
-  Q(:,:,:,lsp) = 0
+
+  !print*, shape(vs1)
+  !print*, shape(ns)
+
+   !print*, 'viscous:  ',shape(vs1(1:lx1,1:lx2,1:lx3,:)),minval(vs1(1:lx1,1:lx2,1:lx3,:)), &
+   !                       maxval(vs1(1:lx1,1:lx2,1:lx3,:)), &
+   !                       minloc(vs1(1:lx1,1:lx2,1:lx3,:)),maxloc(vs1(1:lx1,1:lx2,1:lx3,:))
+
+!  !ARTIFICIAL VISCOSITY (NOT REALLY NEED BELOW 1000 KM ALT.).  NOTE THAT WE DON'T CHECK WHERE SUBCYCLING IS NEEDED SINCE, IN MY EXPERIENCE THEN CODE IS BOMBING ANYTIME IT IS...
+!  ! Interestingly, this is accessing ghost cells of velocity so if they are overwritten by clean_params this viscosity calculation would generate "odd" results
+  if (xicon>0) then
+    do isp=1,lsp-1
+      v1iupdate(1:lx1+1,:,:)=0.5_wp*(vs1(0:lx1,1:lx2,1:lx3,isp)+vs1(1:lx1+1,1:lx2,1:lx3,isp))    !compute an updated interface velocity (only in x1-direction)
+      dv1iupdate=v1iupdate(2:lx1+1,:,:)-v1iupdate(1:lx1,:,:)
+      Q(:,:,:,isp)=ns(1:lx1,1:lx2,1:lx3,isp)*ms(isp)*0.25_wp*xicon**2*(min(dv1iupdate,0._wp))**2   !note that viscosity does not have/need ghost cells
+    end do
+    Q(:,:,:,lsp) = 0
+  else
+    Q=0._wp
+  end if
+   !Q=0.0
 end subroutine VNRicht_artvisc
 
 
 !> Adiabatic compression term, including (precomputed) artifical viscosity.  All velocities must be haloed a single
 !    point prior to calling this procedure.  Upon entering this procedure the specific internal energy density contains
-!    the most recent updated state, while the temperature may or mat not.  Upon exit both the energy density and temp.
-!    can be considered fully updated.
+!    the most recent updated state, while the temperature may or mat not.  Upon exit only the energy density is updated.
 subroutine compression(dt,x,vs1,vs2,vs3,Q,rhoes)
   real(wp), intent(in) :: dt
   class(curvmesh), intent(in) :: x
@@ -244,6 +282,10 @@ subroutine compression(dt,x,vs1,vs2,vs3,Q,rhoes)
   real(wp), dimension(1:size(vs1,1)-4,1:size(vs1,2)-4,1:size(vs1,3)-4) :: paramtrim,rhoeshalf
   real(wp), dimension(0:size(vs1,1)-3,0:size(vs1,2)-3,0:size(vs1,3)-3) :: divvs
   integer :: isp,lsp
+
+   !print*, 'compression:  ',  shape(vs1(1:lx1,1:lx2,1:lx3,:)),minval(vs1(1:lx1,1:lx2,1:lx3,:)), &
+   !                       maxval(vs1(1:lx1,1:lx2,1:lx3,:)), &
+   !                       minloc(vs1(1:lx1,1:lx2,1:lx3,:)),maxloc(vs1(1:lx1,1:lx2,1:lx3,:))
 
   lsp=size(vs1,4)
   do isp=1,lsp
@@ -319,7 +361,6 @@ subroutine impact_ionization(cfg,t,dt,x,ymd,UTsec,f107a,f107,Prprecip,Qeprecip,W
   real(wp), dimension(:,:,:), intent(in) :: Tn
   logical, intent(in) :: first  !< first time step
   real(wp), dimension(1:size(ns,1)-4,1:size(ns,2)-4,1:size(ns,3)-4,size(ns,4)-1) :: Prpreciptmp
-  real(wp), dimension(1:size(ns,1)-4,1:size(ns,2)-4,1:size(ns,3)-4) :: Qepreciptmp
   integer :: iprec,lprec
   !! note PrprecipG and the like are module-scope variables
 
@@ -344,18 +385,19 @@ subroutine impact_ionization(cfg,t,dt,x,ymd,UTsec,f107a,f107,Prprecip,Qeprecip,W
       !! Fang et al 2008 parameterization
       do iprec=1,lprec
         !! loop over the different populations of precipitation (2 here?), accumulating production rates
-        Prpreciptmp = ionrate_fang(W0(:,:,iprec), PhiWmWm2(:,:,iprec), x%alt, nn, Tn, cfg%flag_fang, x%g1)
+        Prpreciptmp = ionrate_fang(W0(:,:,iprec), PhiWmWm2(:,:,iprec), nn, Tn, cfg%flag_fang, x%g1)
         !! calculation based on Fang et al [2008]
         Prprecip=Prprecip+Prpreciptmp
       end do
       Prprecip = max(Prprecip, 1e-5_wp)         ! should resort to fill values only after all populations accumulated
-      Qeprecip = eheating(nn,Tn,Prprecip,ns)    ! once we have total ionization rate (all populations) compute the elec. heating rate
+      Qeprecip = eheating(nn,Prprecip,ns)    ! once we have total ionization rate (all populations) compute the elec. heating rate
     else
       !! glow model
       if (int(t/cfg%dtglow)/=int((t+dt)/cfg%dtglow) .or. first) then
         !if (mpi_cfg%myid==0) print*, 'Note:  preparing to call GLOW...  This could take a while if your grid is large...'
         PrprecipG=0; QeprecipG=0; iverG=0;
-        call ionrate_glow98(W0,PhiWmWm2,ymd,UTsec,f107,f107a,x%glat(1,:,:),x%glon(1,:,:),x%alt,nn,Tn,ns,Ts, &
+        call ionrate_glow98(W0,PhiWmWm2,ymd,UTsec,f107,f107a,x%glat(1,1:lx2,1:lx3),x%glon(1,1:lx2,1:lx3), &
+                            x%alt(1:lx1,1:lx2,1:lx3),nn,Tn,ns,Ts, &
                             QeprecipG, iverG, PrprecipG)    ! bit messy but this will internally iterate over populations
         PrprecipG=max(PrprecipG, 1e-5_wp)
       end if
@@ -399,7 +441,7 @@ subroutine solar_ionization(t,x,ymd,UTsec,f107a,f107,Prprecip,Qeprecip,ns,nn,Tn,
   real(wp), dimension(1:size(Prprecip,1),1:size(Prprecip,2),1:size(Prprecip,3)) :: chi
 
   ! solar zenith angle
-  chi=sza(ymd(1),ymd(2),ymd(3),UTsec,x%glat,x%glon)
+  chi=sza(ymd(1),ymd(2),ymd(3),UTsec,x%glat(1:lx1,1:lx2,1:lx3),x%glon(1:lx1,1:lx2,1:lx3))   ! chi size depends on glon,glat size b/c sza elemental
   !if (mpi_cfg%myid==0 .and. debug) then
   if (debug) then
     print *, 'Computing photoionization for time:  ',t,' using sza range of (root only):  ', &
@@ -418,7 +460,7 @@ subroutine solar_ionization(t,x,ymd,UTsec,f107a,f107,Prprecip,Qeprecip,ns,nn,Tn,
   !! enforce minimum production rate to preserve conditioning for species that rely on constant production
   !! testing should probably be done to see what the best choice is...
 
-  Qepreciptmp = eheating(nn,Tn,Prpreciptmp,ns)
+  Qepreciptmp = eheating(nn,Prpreciptmp,ns)
   !! thermal electron heating rate from Swartz and Nisbet, (1978)
 
   !> photoion ionrate and heating calculated separately, added together with ionrate and heating from Fang or GLOW
@@ -466,6 +508,17 @@ subroutine momentum_source_loss(dt,x,Pr,Lo,ns,rhovs1,vs1)
   real(wp), dimension(-1:size(ns,1)-2,-1:size(ns,2)-2,-1:size(ns,3)-2) :: chrgflux
   integer :: isp,lsp
 
+!   if (maxval(abs(vs1(1:lx1,1:lx2,1:lx3,:))) > 1e4) then
+!     print*, maxloc(abs(vs1(1:lx1,1:lx2,1:lx3,:)))
+!     print*, 'Data corrupted before momentum source solve!'
+!     print*, vs1(1:lx1,lx2,lx3,6)
+!     print*, 'Data corrupted before momentum source solve!'
+!     print*, vs1(1:lx1,lx2-1,lx3-1,6)
+!     print*, 'Data corrupted before momentum source solve!'
+!     print*, vs1(1:lx1,lx2-2,lx3-2,6)
+!     error stop
+!   end if
+
   lsp=size(rhovs1,4)
   do isp=1,lsp-1
     paramtrim=rhovs1(1:lx1,1:lx2,1:lx3,isp)
@@ -473,6 +526,10 @@ subroutine momentum_source_loss(dt,x,Pr,Lo,ns,rhovs1,vs1)
     rhovs1(1:lx1,1:lx2,1:lx3,isp)=paramtrim
     vs1(:,:,:,isp)=rhovs1(:,:,:,isp)/(ms(isp)*max(ns(:,:,:,isp),mindensdiv))
   end do
+
+   !print*, 'vs1 source/loss middle:  ',shape(vs1(1:lx1,1:lx2,1:lx3,:)),minval(vs1(1:lx1,1:lx2,1:lx3,:)), &
+   !                       maxval(vs1(1:lx1,1:lx2,1:lx3,:)), &
+   !                       minloc(vs1(1:lx1,1:lx2,1:lx3,:)),maxloc(vs1(1:lx1,1:lx2,1:lx3,:))
 
   ! Update velocity and momentum for electrons
   ! in keeping with the way the above situations have been handled keep the ghost cells with this calculation
@@ -483,6 +540,10 @@ subroutine momentum_source_loss(dt,x,Pr,Lo,ns,rhovs1,vs1)
   !  vs1(1:lx1,1:lx2,1:lx3,lsp)=1/max(ns(1:lx1,1:lx2,1:lx3,lsp),mindensdiv)/qs(lsp)*(J1-chrgflux)   !density floor needed???
   vs1(:,:,:,lsp)=-1/max(ns(:,:,:,lsp),mindensdiv)/qs(lsp)*chrgflux    !don't bother with FAC contribution...
   rhovs1(:,:,:,lsp)=ns(:,:,:,lsp)*ms(lsp)*vs1(:,:,:,lsp)              ! update electron momentum in case it is ever used
+
+   !print*, 'vs1 source/loss end:  ',shape(vs1(1:lx1,1:lx2,1:lx3,:)),minval(vs1(1:lx1,1:lx2,1:lx3,:)), &
+   !                       maxval(vs1(1:lx1,1:lx2,1:lx3,:)), &
+   !                       minloc(vs1(1:lx1,1:lx2,1:lx3,:)),maxloc(vs1(1:lx1,1:lx2,1:lx3,:))
 end subroutine momentum_source_loss
 
 
@@ -516,13 +577,12 @@ subroutine clean_param(x,paramflag,param)
   class(curvmesh), intent(in) :: x
   integer, intent(in) :: paramflag
   real(wp), dimension(-1:,-1:,-1:,:), intent(inout) :: param     !note that this is 4D and is meant to include ghost cells
-  real(wp), dimension(-1:size(param,1)-2,-1:size(param,2)-2,-1:size(param,3)-2,lsp) :: paramnew
   integer :: isp,ix1,ix2,ix3,iinull,ix1beg,ix1end
 
   select case (paramflag)
     case (1)    !density
-      param(:,:,:,1:lsp-1)=max(param(:,:,:,1:lsp-1),mindens)
-      param(:,:,:,lsp)=sum(param(:,:,:,1:lsp-1),4)       !enforce charge neutrality based on ion densities
+      param(:,:,:,1:lsp-1)=max(param(:,:,:,1:lsp-1),mindens)    ! enforce a minimum density
+      param(:,:,:,lsp)=sum(param(:,:,:,1:lsp-1),4)              !enforce charge neutrality based on ion densities
 
       do isp=1,lsp             !set null cells to some value
         if (isp==1) then
@@ -552,6 +612,13 @@ subroutine clean_param(x,paramflag,param)
       param(:,lx2+1:lx2+2,:,:)=mindensdiv
       param(:,:,-1:0,:)=mindensdiv
       param(:,:,lx3+1:lx3+2,:)=mindensdiv
+
+!      param(-1:0,:,:,:)=1
+!      param(lx1+1:lx1+2,:,:,:)=1
+!      param(:,-1:0,:,:)=1
+!      param(:,lx2+1:lx2+2,:,:)=1
+!      param(:,:,-1:0,:)=1
+!      param(:,:,lx3+1:lx3+2,:)=1
     case (2)    !velocity
       do isp=1,lsp       !set null cells to zero mometnum
         do iinull=1,x%lnull
@@ -574,9 +641,10 @@ subroutine clean_param(x,paramflag,param)
               end do
 
               ix1end=ix1beg
-              do while(x%nullpts(ix1end,ix2,ix3) .and. ix1end<lx1)     !find the first non-null index for this field line
+              do while(x%nullpts(ix1end,ix2,ix3) .and. ix1end<lx1)     !find the last non-null index for this field line
                 ix1end=ix1end+1
               end do
+              !if (ix1end /= ix1beg .and. ix1end /= lx1) ix1end=ix1end-1      ! I think this has been left out for a long time!?
 
               if (ix1beg /= lx1) then    !only do this if we actually have null grid points
                 param(ix1beg,ix2,ix3,isp)=param(ix1beg+1,ix2,ix3,isp)
@@ -637,5 +705,136 @@ subroutine clean_param(x,paramflag,param)
       error stop '!non-standard parameter selected in clean_params, unreliable/incorrect results possible...'
   end select
 end subroutine clean_param
+
+
+!> Deal with cells outside computation domain; do not touch ghost cells in any way - exercise caution in the way null cells are
+!    treated as compared to a "normal" clean.  Screen cells "near" null cells for excessively large parameter values that may
+!    result from interpolation artifacts.
+subroutine clean_param_after_regrid(x,paramflag,param)
+  !------------------------------------------------------------
+  !-------THIS SUBROUTINE ZEROS OUT ALL NULL CELLS AND HANDLES
+  !-------POSSIBLE NULL ARTIFACTS AT BOUNDARIES
+  !------------------------------------------------------------
+  class(curvmesh), intent(in) :: x
+  integer, intent(in) :: paramflag
+  real(wp), dimension(-1:,-1:,-1:,:), intent(inout) :: param     !note that this is 4D and is meant to include ghost cells
+  integer :: isp,ix1,ix2,ix3,iinull,ix1beg,ix1end,ix2beg
+
+  select case (paramflag)
+    case (1)    !density
+      param(:,:,:,1:lsp-1)=max(param(:,:,:,1:lsp-1),mindens)    ! enforce a minimum density
+      param(:,:,:,lsp)=sum(param(:,:,:,1:lsp-1),4)              !enforce charge neutrality based on ion densities
+
+      do isp=1,lsp             !set null cells to some value
+        if (isp==1) then
+          do iinull=1,x%lnull
+            ix1=x%inull(iinull,1)
+            ix2=x%inull(iinull,2)
+            ix3=x%inull(iinull,3)
+
+            param(ix1,ix2,ix3,isp)=mindensnull*1e-2_wp
+          end do
+        else
+          do iinull=1,x%lnull
+            ix1=x%inull(iinull,1)
+            ix2=x%inull(iinull,2)
+            ix3=x%inull(iinull,3)
+
+            param(ix1,ix2,ix3,isp)=mindensnull
+          end do
+        end if
+
+        !> we want to try to prevent issues with interpolation of density
+        do ix3=1,lx3
+          do ix1=1,lx1
+            ix2beg=1
+            do while( (.not. x%nullpts(ix1,ix2beg,ix3)) .and. ix2beg<lx2)     !find the first non-null index for this field line, need to be careful if no null points exist...
+              ix2beg=ix2beg+1
+            end do
+
+            !ix1end=ix1beg
+            !do while(x%nullpts(ix1end,ix2,ix3) .and. ix1end<lx1)     !find the last non-null index for this field line
+            !  ix1end=ix1end+1
+            !end do
+            !!if (ix1end /= ix1beg .and. ix1end /= lx1) ix1end=ix1end-1      ! I think this has been left out for a long time!?
+
+            if (ix2beg /= lx2) then    !only do this if we actually have null grid points
+              param(ix1,ix2beg,ix3,isp)=mindensnull
+            end if
+            !if (ix1end /= lx1) then
+            !  param(ix1end,ix2,ix3,isp)=param(ix1end-1,ix2,ix3,isp)
+            !end if
+          end do
+        end do
+      end do
+    case (2)    !velocity
+      do isp=1,lsp       !set null cells to zero mometnum
+        do iinull=1,x%lnull
+          ix1=x%inull(iinull,1)
+          ix2=x%inull(iinull,2)
+          ix3=x%inull(iinull,3)
+
+          param(ix1,ix2,ix3,isp) = 0
+        end do
+      end do
+
+      !FORCE THE BORDER CELLS TO BE SAME AS THE FIRST INTERIOR CELL (deals with some issues on dipole grids), skip for non-dipole.
+      if (x%gridflag==0) then      ! closed dipole
+        do isp=1,lsp
+          do ix3=1,lx3
+            do ix2=1,lx2
+              ix1beg=1
+              do while( (.not. x%nullpts(ix1beg,ix2,ix3)) .and. ix1beg<lx1)     !find the first non-null index for this field line, need to be careful if no null points exist...
+                ix1beg=ix1beg+1
+              end do
+
+              ix1end=ix1beg
+              do while(x%nullpts(ix1end,ix2,ix3) .and. ix1end<lx1)     !find the last non-null index for this field line
+                ix1end=ix1end+1
+              end do
+              !if (ix1end /= ix1beg .and. ix1end /= lx1) ix1end=ix1end-1      ! I think this has been left out for a long time!?
+
+              if (ix1beg /= lx1) then    !only do this if we actually have null grid points
+                param(ix1beg,ix2,ix3,isp)=param(ix1beg+1,ix2,ix3,isp)
+              end if
+              if (ix1end /= lx1) then
+                param(ix1end,ix2,ix3,isp)=param(ix1end-1,ix2,ix3,isp)
+              end if
+            end do
+          end do
+        end do
+      elseif (x%gridflag==1) then     ! open dipole grid, inverted
+        do isp=1,lsp
+          do ix3=1,lx3
+            do ix2=1,lx2
+              ix1end=1
+              do while((.not. x%nullpts(ix1end,ix2,ix3)) .and. ix1end<lx1)     !find the first non-null index for this field line
+                ix1end=ix1end+1
+              end do
+
+              if (ix1end /= lx1) then
+                param(ix1end,ix2,ix3,isp)=param(ix1end-1,ix2,ix3,isp)
+              end if
+            end do
+          end do
+        end do
+      end if
+    case (3)    !temperature
+      param=max(param,100._wp)     !temperature floor
+
+      do isp=1,lsp       !set null cells to some value
+        do iinull=1,x%lnull
+          ix1=x%inull(iinull,1)
+          ix2=x%inull(iinull,2)
+          ix3=x%inull(iinull,3)
+
+          param(ix1,ix2,ix3,isp) = 100
+        end do
+      end do
+    case default
+      !! throw an error as the code is likely not going to behave in a predictable way in this situation...
+      error stop '!non-standard parameter selected in clean_params, unreliable/incorrect results possible...'
+  end select
+end subroutine clean_param_after_regrid
 
 end module multifluid

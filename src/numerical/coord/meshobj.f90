@@ -10,7 +10,8 @@ use geomagnetic, only: geog2geomag,geomag2geog,r2alt,alt2r,rotgg2gm
 use spherical, only: er_spherical,etheta_spherical,ephi_spherical
 
 implicit none (type, external)
-public
+private
+public :: curvmesh
 
 !> curvmesh is an abstract type containing functionality and data that is not specific to individual coordinate systems
 !   (which are extended types).  Note that all arrays are pointers because they need to be targets and allocatable AND the fortran
@@ -36,6 +37,7 @@ type, abstract :: curvmesh
   logical :: null_alloc_status=.false.
   logical :: geog_set_status=.false.      ! geographic coords. get allocated with other arrays, but get set separately
   logical :: coord_set_status_root=.false.
+  logical :: geogi_set_status=.false.
 
   !> sizes.  Specified and set by base class methods
   integer :: lx1,lx2,lx3,lx2all,lx3all
@@ -131,6 +133,7 @@ type, abstract :: curvmesh
 
   !> geographic data; pointers
   real(wp), dimension(:,:,:), pointer :: glat,glon,alt
+  real(wp), dimension(:,:,:), pointer :: glati,gloni,alti
 
   !> magnetic field magnitude and inclination.  Pointers
   real(wp), dimension(:,:,:), pointer :: Bmag
@@ -173,6 +176,7 @@ type, abstract :: curvmesh
     procedure :: set_periodic           ! set the flag which labels grid as periodic vs. aperiodic
     procedure :: set_center             ! set the center of the grid (only needed for "floating" coordinate systems)
     procedure :: calc_unitvec_geo       ! compute geographic unit vectors over the grid
+    procedure :: calc_geographici       ! cell edge locations
     !final :: destructor
     !! an abstract type cannot have a final procedure, as the final procedure
     !! must act on a type and not polymorhpic object
@@ -191,6 +195,7 @@ type, abstract :: curvmesh
     procedure(calc_procedure), deferred :: calc_e1
     procedure(calc_procedure), deferred :: calc_e2
     procedure(calc_procedure), deferred :: calc_e3
+    procedure(native_convert), deferred :: native2ECEFspher
 
     !! these bindings have different interfaces due to evaluation of metric factors at cell centers
     !! vs. interfaces
@@ -203,7 +208,7 @@ type, abstract :: curvmesh
 end type curvmesh
 
 
-!> interfaces for deferred bindings, note all should operate on data in self - this provides maximum
+!> interfaces for deferred bindings, most will operate on data in self - this provides maximum
 !! flexibility for the extension to use whatever data it needs to compute the various grid quantities
 abstract interface
   subroutine initmake(self)
@@ -221,6 +226,17 @@ abstract interface
     real(wp), dimension(lbound(coord1,1):ubound(coord1,1),lbound(coord1,2):ubound(coord1,2), &
                         lbound(coord1,3):ubound(coord1,3)) :: hval   ! arrays may not start at index 1
   end function calc_metric
+  subroutine native_convert(self,glonctr,glatctr,coord1,coord2,coord3,r,theta,phispher)
+    import curvmesh
+    import wp
+    class(curvmesh), intent(in) :: self
+    real(wp) :: glonctr,glatctr
+    real(wp), dimension(:), pointer, intent(in) :: coord1,coord2,coord3
+    !real(wp), dimension(:,:,:), intent(inout) :: r,theta,phispher
+    real(wp), dimension(lbound(coord1,1):ubound(coord1,1),lbound(coord2,1):ubound(coord2,1), &
+                lbound(coord3,1):ubound(coord3,1)), &
+                intent(inout) :: r,theta,phispher
+  end subroutine native_convert
 end interface
 
 
@@ -322,14 +338,15 @@ contains
     !   glat/glon to be the same across the x3 dimension so that the neutral atmosphere and photoionization
     !   will be constant vs. x3.  This is most typically used in instability simulations when one wants to
     !   explicitly remove any dependence of background parameters on the x3 direction.  One would not want to use
-    !   this when simply trying to model an angular coordinate (e.g. longitude) across the full globe as the 
-    !   atmospheric and SZA changes are needed to realistically capture the system.  
+    !   this when simply trying to model an angular coordinate (e.g. longitude) across the full globe as the
+    !   atmospheric and SZA changes are needed to realistically capture the system.
     ! force periodicity in geographic locations using reference meridian data
+    !! FIXME: specify ghost cells for glat/glon arrays?
     if (flagperiodic==1) then
       do ix3=1,self%lx3
-        self%glat(:,:,ix3)=refglat(:,:)
-        self%glon(:,:,ix3)=refglon(:,:)
-        self%alt(:,:,ix3)=refalt(:,:)
+        self%glat(1:self%lx1,1:self%lx2,ix3)=refglat(:,:)
+        self%glon(1:self%lx1,1:self%lx2,ix3)=refglon(:,:)
+        self%alt(1:self%lx1,1:self%lx2,ix3)=refalt(:,:)
       end do
     end if
   end subroutine set_periodic
@@ -407,6 +424,9 @@ contains
     integer :: lx1,lx2,lx3
 
     if (.not. self%dxi_alloc_status .or. .not. self%coord_alloc_status) then
+      print*, self%dxi_alloc_status,self%coord_alloc_status
+      print*, (.not. self%dxi_alloc_status), (.not. self%coord_alloc_status)
+      print*, .not. self%dxi_alloc_status .eqv. self%dxi_alloc_status
       error stop ' attempting to compute differential lengths without interface diffs or metric factors!'
     end if
 
@@ -458,7 +478,17 @@ contains
 
     allocate(self%I(1:lx2,1:lx3))
     allocate(self%Bmag(1:lx1,1:lx2,1:lx3))
-    allocate(self%g1, self%g2, self%g3, self%r, self%theta, self%phi, self%alt, self%glon, self%glat, mold=self%Bmag)
+!    allocate(self%g1, self%g2, self%g3, self%r, self%theta, self%phi, self%alt, self%glon, self%glat, mold=self%Bmag)
+    allocate(self%g1, self%g2, self%g3, mold=self%Bmag)
+
+    ! coordinate-related quantities will retain ghost cells
+    allocate(self%r(-1:lx1+2,-1:lx2+2,-1:lx3+2))
+    allocate(self%theta, self%phi, self%alt, self%glon, self%glat, mold=self%r)
+
+    !! by default these are not use so we allocate on request in set_geographici()
+    !! some location edges are required; only for workers tho
+    !allocate(self%gloni(1:lx1+1,1:lx2+1,1:lx3+1))
+    !allocate(self%glati,self%alti, mold=self%gloni)
 
     self%coord_alloc_status=.true.
   end subroutine init_storage
@@ -493,8 +523,13 @@ contains
     allocate(self%h1x3iall(1:lx1,1:lx2all,1:lx3all+1))
     allocate(self%h2x3iall, self%h3x3iall, mold=self%h1x3iall)
 
-    allocate(self%rall(1:lx1,1:lx2all,1:lx3all))
-    allocate(self%thetaall, self%phiall, self%altall, self%Bmagall, self%glonall, mold=self%rall)
+!    allocate(self%rall(1:lx1,1:lx2all,1:lx3all))
+!    allocate(self%thetaall, self%phiall, self%altall, self%Bmagall, self%glonall, mold=self%rall)
+
+    allocate(self%rall(-1:lx1+2,-1:lx2all+2,-1:lx3all+2))
+    allocate(self%thetaall, self%phiall, self%altall, self%glonall, mold=self%rall)
+
+    allocate(self%Bmagall(1:lx1,1:lx2all,1:lx3all))
 
     self%coord_alloc_status_root=.true.
   end subroutine init_storage_root
@@ -540,6 +575,7 @@ contains
     class(curvmesh), intent(inout) :: self
     integer :: lx1,lx2,lx3
     integer :: icount,ix1,ix2,ix3
+    real(wp), dimension(:,:,:), allocatable :: alttmp
 
     ! error checking, we require the geographic coords. before this is done
     if (.not. self%geog_set_status) error stop ' attempting to compute null points prior to setting geographic coordinates!'
@@ -550,9 +586,12 @@ contains
     ! set null points for this simulation
     allocate(self%nullpts(1:lx1,1:lx2,1:lx3))
     self%nullpts=.false.
-    where (self%alt < 80e3_wp)
+    allocate(alttmp(lx1,lx2,lx3))
+    alttmp=self%alt(1:lx1,1:lx2,1:lx3)
+    where (alttmp < 80e3_wp)
       self%nullpts=.true.
     end where
+    deallocate(alttmp)
 
     ! count needed storage for null indices
     self%lnull=0;
@@ -594,8 +633,37 @@ contains
   end subroutine calc_geographic
 
 
+  !> this isn't used by computational parts of gemini but may be need for certain types of 3D visualization
+  !    as such we only allocate and calculate interface geographic locations on demand and not be default
+  subroutine calc_geographici(self)
+    class(curvmesh), intent(inout) :: self
+    real(wp), dimension(:,:,:), allocatable :: ri,thetai,phispheri
+
+    if (.not. self%geogi_set_status) then 
+      allocate(self%alti(1:self%lx1+1,1:self%lx2+1,1:self%lx3+1))
+      allocate(self%gloni,self%glati, mold=self%alti) 
+
+      allocate(ri,thetai,phispheri, mold=self%alti)
+
+      call self%native2ECEFspher(self%glonctr,self%glatctr,self%x1i,self%x2i,self%x3i,ri,thetai,phispheri)
+      !call geomag2geog(phispheri,thetai,self%gloni,self%glati) 
+      !self%alti=r2alt(ri)
+
+      self%alti(:,:,:)=ri(:,:,:)*cos(thetai(:,:,:))    ! z
+      self%gloni(:,:,:)=ri(:,:,:)*sin(thetai(:,:,:))*cos(phispheri(:,:,:))    ! x
+      self%glati(:,:,:)=ri(:,:,:)*sin(thetai(:,:,:))*sin(phispheri(:,:,:))    ! y
+
+      deallocate(ri,thetai,phispheri)
+      self%geogi_set_status=.true.
+    else
+      !print*, 'WARNING:  geographic locations of cell edges already calculated!'
+      return
+    end if
+  end subroutine calc_geographici
+
+
   !> procedure to compute (but not store - external arrays provided as input) and geographic coordinate unit vectors
-  !    This works on a full spatial arrays worth of data.  
+  !    This works on a full spatial arrays worth of data.
   subroutine calc_unitvec_geo(self,ealt,eglon,eglat)
     class(curvmesh), intent(in) :: self
     real(wp), dimension(:,:,:,:), intent(out) :: ealt,eglon,eglat
@@ -603,10 +671,10 @@ contains
     real(wp) :: thetagg,phigg    ! geographic spherical coords
     real(wp), dimension(3,3) :: Rgg2gm
     real(wp), dimension(3,1) :: ehere,ehererot
-   
-    if ( .not. self%geog_set_status) error stop 'geographic coords. must be set prior to & 
-                                                 computing unit vectors'
 
+    if ( .not. self%geog_set_status) then
+      error stop 'geographic coords. must be set prior to computing unit vectors'
+    endif
     ! sizes
     lx1=self%lx1; lx2=self%lx2; lx3=self%lx3
 
@@ -625,12 +693,12 @@ contains
           ealt(ix1,ix2,ix3,1:3)=ehererot(1:3,1)
 
           ! latitude unit vector
-          ehere(1:3,1)=-1._wp*etheta_spherical(thetagg,phigg)
+          ehere(1:3,1) = -1*etheta_spherical(thetagg,phigg)
           ehererot=matmul(Rgg2gm,ehere)
           eglat(ix1,ix2,ix3,1:3)=ehererot(1:3,1)
 
           ! longitude
-          ehere(1:3,1)=ephi_spherical(thetagg,phigg)
+          ehere(1:3,1) = ephi_spherical(thetagg,phigg)
           ehererot=matmul(Rgg2gm,ehere)
           eglon(ix1,ix2,ix3,1:3)=ehererot(1:3,1)
         end do
@@ -738,7 +806,7 @@ contains
     allocate(realnullpts(1:self%lx1,1:self%lx2,1:self%lx3))
     realnullpts=0.0
     where (self%nullpts)
-      realnullpts=1._wp
+      realnullpts = 1
     end where
     call hf%write('/nullpts',realnullpts)
     deallocate(realnullpts)
@@ -798,6 +866,10 @@ contains
       deallocate(self%alt,self%glon,self%glat)
       self%coord_alloc_status=.false.
       self%geog_set_status=.false.
+    end if
+    if (self%geogi_set_status) then
+      deallocate(self%alti,self%gloni,self%glati)
+      self%geogi_set_status=.false.
     end if
     if (self%coord_alloc_status_root) then
       deallocate(self%h1all,self%h2all,self%h3all)

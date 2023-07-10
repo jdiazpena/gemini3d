@@ -7,6 +7,10 @@ use mpimod, only: mpi_cfg
 use neutraldataobj, only: neutraldata
 !!! FIXME: this should be conditioned on actually compiling with libgemini-mpi
 !use neutraldata3Dobj_mpi, only: neutraldata3D
+use neutraldata3Dobj, only: neutraldata3D
+use neutraldata3Dobj_fclaw, only: neutraldata3D_fclaw
+use neutraldata3Dobj_fclaw_axisymm, only: neutraldata3D_fclaw_axisymm
+use neutraldata3Dobj_fclaw_3Dx, only: neutraldata3D_fclaw_3Dx
 use neutraldata3Dobj_geog_mpi, only: neutraldata3D_geog
 use neutraldata3Dobj_geom_mpi, only: neutraldata3D_geom
 !!!
@@ -48,9 +52,13 @@ contains
         allocate(neutraldata3D_geom::atmosperturb)
       case (4)
         allocate(neutraldata3D_geog::atmosperturb)
-      !!!
+      case (5)     ! we assume forestGEMINI will control things, this will be axisymmetric MAGIC-forest data
+        allocate(neutraldata3D_fclaw_axisymm::atmosperturb)
+      case (6)     ! we assume forestGEMINI will control things, this will be 3Dx MAGIC-forest data
+        allocate(neutraldata3D_fclaw_3Dx::atmosperturb)
       case default
-        error stop 'non-standard neutral interpolation type chosen in config.nml...'
+        print*, 'non-standard neutral interpolation type chosen in config.nml:  ',cfg%interptype
+        error stop
       end select
 
       ! call object init procedure
@@ -59,10 +67,11 @@ contains
   end subroutine init_neutralperturb
 
 
- !> update neutral perturbations and add to main neutral arrays
-  subroutine neutral_perturb(cfg,dt,dtneu,t,ymd,UTsec,x,v2grid,v3grid,atmos,atmosperturb)
+ !> update neutral perturbations and add to main neutral arrays.  It is assumed that the main GEMINI app will control
+ !    when and where this gets called.
+  subroutine neutral_perturb(cfg,dt,t,ymd,UTsec,x,v2grid,v3grid,atmos,atmosperturb)
     type(gemini_cfg), intent(in) :: cfg
-    real(wp), intent(in) :: dt,dtneu
+    real(wp), intent(in) :: dt
     real(wp), intent(in) :: t
     integer, dimension(3), intent(in) :: ymd
     !! date for which we wish to calculate perturbations

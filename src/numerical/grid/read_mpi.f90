@@ -1,6 +1,4 @@
-submodule (grid_mpi) grid_read_mpi
-
-!use mpimod, only : mpi_realprec
+submodule (grid:grid_mpi) grid_read_mpi
 
 implicit none (type, external)
 
@@ -8,10 +6,12 @@ contains
 
 !> Prep either Cartesian or dipole grid object.  Note that there are also module-scope variables
 !   that are (redundantly, for convenience) defined based on the grid structure and this procedure
-!   must also set those.
+!   must also set those.  This involves setting some fullgrid parameters
 module procedure read_grid_cartdip
 ! subroutine read_grid(indatsize,indatgrid,flagperiodic,x)
-  call generate_worker_grid(x1,x2,x3,x2all,x3all,glonctr,glatctr,x)
+  !call generate_worker_grid(x1,x2,x3,x2all,x3all,glonctr,glatctr,x)
+  call grid_internaldata_alloc(x1,x2,x3,x2all,x3all,glonctr,glatctr,x)
+  call grid_internaldata_generate(x)
 
   !> We need to collect the info for root's fullgrid variables
   if (mpi_cfg%myid==0) then
@@ -112,7 +112,7 @@ end procedure read_grid_cartdip
 
 !> Assign periodic or not based on user input -- this needs to be done "outside" object methods this e nforces
 !    geographic locations to be constant along the x3-direction so that empirical models etc. will spit out data
-!    consistent with a periodic domain, i.e. constant along x3.  
+!    consistent with a periodic domain, i.e. constant along x3.
 subroutine enforce_gridmpi_periodic(flagperiodic,x)
   integer, intent(in) :: flagperiodic
   class(curvmesh), intent(inout) :: x
@@ -122,7 +122,7 @@ subroutine enforce_gridmpi_periodic(flagperiodic,x)
   if (flagperiodic/=0) then
     select case (flagperiodic)
       case(1)
-        refalt=x%alt(:,:,1); refglon=x%glon(:,:,1); refglat=x%glat(:,:,1);
+        refalt=x%alt(1:lx1,1:lx2,1); refglon=x%glon(1:lx1,1:lx2,1); refglat=x%glat(1:lx1,1:lx2,1);
         call gather_ref_meridian(refalt,refglon,refglat)
         call x%set_periodic(flagperiodic,refalt,refglon,refglat)
       case default
@@ -138,7 +138,6 @@ subroutine gather_ref_meridian(refalt,refglon,refglat)
   real(wp), dimension(:,:), intent(inout) :: refalt,refglon,refglat
   integer :: iid,iid3
   integer :: lx1,lx2
-  integer :: ierr
 
   ! set sizes for convenience
   lx1=size(refalt,1); lx2=size(refalt,2);
@@ -147,15 +146,15 @@ subroutine gather_ref_meridian(refalt,refglon,refglat)
   if (mpi_cfg%myid3==0) then
     do iid3=1,mpi_cfg%lid3-1    ! pass data to other members of my row of the process grid
       iid=grid2ID(mpi_cfg%myid2,iid3)
-      call mpi_send(refalt,lx1*lx2,MPI_REALPREC,iid,tag%refalt,MPI_COMM_WORLD,ierr)
-      call mpi_send(refglon,lx1*lx2,MPI_REALPREC,iid,tag%refglon,MPI_COMM_WORLD,ierr)
-      call mpi_send(refglat,lx1*lx2,MPI_REALPREC,iid,tag%refglat,MPI_COMM_WORLD,ierr)
+      call mpi_send(refalt,lx1*lx2,MPI_REALPREC,iid,tag%refalt,MPI_COMM_WORLD)
+      call mpi_send(refglon,lx1*lx2,MPI_REALPREC,iid,tag%refglon,MPI_COMM_WORLD)
+      call mpi_send(refglat,lx1*lx2,MPI_REALPREC,iid,tag%refglat,MPI_COMM_WORLD)
     end do
   else
     iid=grid2ID(mpi_cfg%myid2,0)
-    call mpi_recv(refalt,lx1*lx2,MPI_REALPREC,iid,tag%refalt,MPI_COMM_WORLD,MPI_STATUS_IGNORE,ierr)
-    call mpi_recv(refglon,lx1*lx2,MPI_REALPREC,iid,tag%refglon,MPI_COMM_WORLD,MPI_STATUS_IGNORE,ierr)
-    call mpi_recv(refglat,lx1*lx2,MPI_REALPREC,iid,tag%refglat,MPI_COMM_WORLD,MPI_STATUS_IGNORE,ierr)
+    call mpi_recv(refalt,lx1*lx2,MPI_REALPREC,iid,tag%refalt,MPI_COMM_WORLD,MPI_STATUS_IGNORE)
+    call mpi_recv(refglon,lx1*lx2,MPI_REALPREC,iid,tag%refglon,MPI_COMM_WORLD,MPI_STATUS_IGNORE)
+    call mpi_recv(refglat,lx1*lx2,MPI_REALPREC,iid,tag%refglat,MPI_COMM_WORLD,MPI_STATUS_IGNORE)
   end if
 end subroutine gather_ref_meridian
 
@@ -202,14 +201,14 @@ subroutine gather_grid_root(h1,h2,h3, &
   call gather_recv3D_x3i(h2x3i,tag%h2,h2x3iall)
   call gather_recv3D_x3i(h3x3i,tag%h3,h3x3iall)
 
-  call gather_recv(r,tag%r,rall)
-  call gather_recv(theta,tag%theta,thetaall)
-  call gather_recv(phi,tag%phi,phiall)
+  call gather_recv3D_ghost(r,tag%r,rall)
+  call gather_recv3D_ghost(theta,tag%theta,thetaall)
+  call gather_recv3D_ghost(phi,tag%phi,phiall)
 
-  call gather_recv(alt,tag%alt,altall)
+  call gather_recv3D_ghost(alt,tag%alt,altall)
+  call gather_recv3D_ghost(glon,tag%glon,glonall)
+
   call gather_recv(Bmag,tag%Bmag,Bmagall)
-  call gather_recv(glon,tag%glon,glonall)
-
 end subroutine gather_grid_root
 
 
@@ -243,13 +242,14 @@ subroutine gather_grid_workers(h1,h2,h3, &
   call gather_send3D_x3i(h2x3i,tag%h2)
   call gather_send3D_x3i(h3x3i,tag%h3)
 
-  call gather_send(r,tag%r)
-  call gather_send(theta,tag%theta)
-  call gather_send(phi,tag%phi)
+  call gather_send3D_ghost(r,tag%r)
+  call gather_send3D_ghost(theta,tag%theta)
+  call gather_send3D_ghost(phi,tag%phi)
 
-  call gather_send(alt,tag%alt)
+  call gather_send3D_ghost(alt,tag%alt)
+  call gather_send3D_ghost(glon,tag%glon)
+
   call gather_send(Bmag,tag%Bmag)
-  call gather_send(glon,tag%glon)
 end subroutine gather_grid_workers
 
 end submodule grid_read_mpi

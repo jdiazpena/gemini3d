@@ -10,10 +10,10 @@ use gemini3d_config, only: gemini_cfg
 use reader, only: get_grid2,get_neutral2
 use timeutils, only: dateinc,date_filename
 use h5fortran, only: hdf5_file
-use filesystem, only: get_filename
 use grid, only: gridflag
 
 implicit none (type,external)
+private
 public :: neutraldata2D
 
 !> type definition for 3D neutral data
@@ -72,7 +72,6 @@ contains
     real(wp), intent(in) :: dtmodel,dtdata
     integer, dimension(3), intent(in) :: ymd            ! target date of initiation
     real(wp), intent(in) :: UTsec                       ! target time of initiation
-    integer :: lc1,lc2,lc3
     character(:), allocatable :: strname    ! allow auto-allocate for strings
 
     ! force 3D interpolation regardless of working subarray size
@@ -191,12 +190,20 @@ contains
   subroutine load_size_neu2D(self)
     class(neutraldata2D), intent(inout) :: self
 
+    integer :: i
+    i = self%lxn
+    !! avoid unused argument warnings
+
   end subroutine load_size_neu2D
 
 
   !> do nothing stub
   subroutine load_grid_neu2D(self)
     class(neutraldata2D), intent(inout) :: self
+
+    integer :: i
+    i = self%lxn
+    !! avoid unused argument warnings
 
   end subroutine load_grid_neu2D
 
@@ -207,11 +214,10 @@ contains
     real(wp), intent(in) :: t,dtmodel
     integer, dimension(3), intent(inout) :: ymdtmp
     real(wp), intent(inout) :: UTsectmp
-    integer :: iid,ierr
     integer :: lhorzn,lzn                        !number of horizontal grid points
-    real(wp), dimension(:,:,:), allocatable :: paramall
-    type(hdf5_file) :: hf
-    character(:), allocatable :: fn
+
+    UTsectmp = 0*t*dtmodel
+    !! avoid unused argument warnings
 
     ! sizes for convenience
     lhorzn=self%lhorzn; lzn=self%lzn;
@@ -220,8 +226,10 @@ contains
     UTsectmp = self%UTsecref(2)
     call dateinc(self%dt,ymdtmp,UTsectmp)                !get the date for "next" params
 
-    call get_neutral2(date_filename(self%sourcedir,ymdtmp,UTsectmp), &
+    call get_neutral2(date_filename(self%sourcedir,ymdtmp,UTsectmp) // ".h5", &
       self%dnO,self%dnN2,self%dnO2,self%dvnhorz,self%dvnz,self%dTn)
+
+    !print*, 'Loading 2D neutral data from:  ',date_filename(self%sourcedir,ymdtmp,UTsectmp) // ".h5"
 
     if (debug) then
       print *, 'Min/max values for dnO:  ',minval(self%dnO),maxval(self%dnO)

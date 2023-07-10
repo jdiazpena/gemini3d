@@ -4,25 +4,25 @@ module gemini3d_mpi
 use, intrinsic :: iso_fortran_env, only : stderr=>error_unit
 use, intrinsic :: iso_c_binding, only : c_ptr
 use phys_consts, only: wp,debug
-use mpimod, only: mpi_manualgrid, process_grid_auto, mpi_cfg, mpibreakdown, mpisetup
+use mpimod, only: mpi_manualgrid, process_grid_auto, mpi_cfg, mpibreakdown, mpisetup, tag=>gemini_mpi, halo
 use meshobj, only: curvmesh
 use gemini3d_config, only: gemini_cfg
 use io, only: output_plasma,output_aur,find_milestone,input_plasma,create_outdir
 use potential_comm, only: get_BGEfields,velocities
-use grid, only: lx1,lx2,lx3
-use grid_mpi, only: grid_drift, read_grid
+use grid, only: lx1,lx2,lx3, grid_drift, read_grid, calc_subgrid_size
 use collisions, only: conductivities
 use potentialBCs_mumps, only: init_Efieldinput
 use potential_comm,only : pot2perpfield, electrodynamics
 use neutral_perturbations, only: init_neutralperturb,neutral_denstemp_update,neutral_wind_update,neutral_perturb
-use temporal, only : dt_comm
+use temporal_mpi, only : dt_comm
 use sanity_check, only : check_finite_pertub, check_finite_output
-use advec_mpi, only: set_global_boundaries_allspec, halo_interface_vels_allspec
-use multifluid_mpi, only: halo_allparams
-use sources_mpi, only: RK2_prep_mpi_allspec
+use advec_mpi, only: halo_interface_vels_allspec
+use multifluid_mpi, only: halo_allparams, halo_fluidvars
+use sources_mpi, only: RK2_prep_mpi_allspec, RK2_global_boundary_allspec
 use ionization_mpi, only: get_gavg_Tinf
 use neutral_perturbations, only: clear_dneu
-use gemini3d, only: fluidvar_pointers,fluidauxvar_pointers, electrovar_pointers, gemini_work
+use gemini3d, only: fluidvar_pointers,fluidauxvar_pointers, electrovar_pointers, gemini_work,  &
+                      v2grid, v3grid, setv2v3, set_start_timefromcfg
 
 implicit none (type, external)
 private
@@ -30,8 +30,9 @@ public :: init_procgrid, outdir_fullgridvaralloc, read_grid_in, get_initial_stat
             BGfield_Lagrangian, check_dryrun, check_fileoutput,  &
             get_initial_drifts, init_Efieldinput_in, pot2perpfield_in, init_neutralperturb_in, dt_select, &
             neutral_atmos_wind_update, neutral_perturb_in, electrodynamics_in, check_finite_output_in, &
-            halo_interface_vels_allspec_in, set_global_boundaries_allspec_in, halo_allparams_in, &
-            RK2_prep_mpi_allspec_in,get_gavg_Tinf_in, clear_dneu_in, mpisetup_in, mpiparms
+            halo_interface_vels_allspec_in, halo_allparams_in, &
+            RK2_prep_mpi_allspec_in,get_gavg_Tinf_in, clear_dneu_in, mpisetup_in, mpiparms, calc_subgrid_size_in, &
+            RK2_global_boundary_allspec_in, halo_fluidvars_in
 
 real(wp), parameter :: dtscale=2                     ! controls how rapidly the time step is allowed to change
 
@@ -75,8 +76,75 @@ contains
   end subroutine read_grid_in
 
 
-  !> load initial conditions
-  subroutine get_initial_state(cfg,fluidvars,electrovars,intvars,x,UTsec,ymd,tdur)
+  !> interface for setting simulation subgrid sizes for a particular worker in grid module
+  subroutine calc_subgrid_size_in(lx2all,lx3all)
+    integer, intent(in) :: lx2all, lx3all
+
+    call calc_subgrid_size(lx2all,lx3all)
+  end subroutine calc_subgrid_size_in
+
+
+!  !> load initial conditions and check if this is a restart run; set time variables accordingly
+!  subroutine get_initial_state(cfg,fluidvars,electrovars,intvars,x,UTsec,ymd,tdur)
+!    type(gemini_cfg), intent(inout) :: cfg
+!    real(wp), dimension(:,:,:,:), pointer, intent(inout) :: fluidvars
+!    real(wp), dimension(:,:,:,:), pointer, intent(inout) :: electrovars
+!    type(gemini_work), intent(inout) :: intvars
+!    class(curvmesh), intent(in) :: x
+!    real(wp), intent(inout) :: UTsec
+!    integer, dimension(3), intent(inout) :: ymd
+!    real(wp), intent(inout) :: tdur
+!
+!    real(wp), dimension(:,:,:,:), pointer :: ns,vs1,vs2,vs3,Ts
+!    real(wp), dimension(:,:,:), pointer :: E1,E2,E3,J1,J2,J3,Phi
+!    integer, dimension(3) :: ymdtmp
+!    real(wp) :: UTsectmp,ttmp
+!    character(:), allocatable :: filetmp
+!
+!    call fluidvar_pointers(fluidvars,ns,vs1,vs2,vs3,Ts)
+!    call electrovar_pointers(electrovars,E1,E2,E3,J1,J2,J3,Phi)
+!
+!    call find_milestone(cfg, ttmp, ymdtmp, UTsectmp, filetmp)
+!    if ( ttmp > 0 ) then
+!      !! restart scenario
+!      if (mpi_cfg%myid==0) then
+!        print*, '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
+!        print*, '! Restarting simulation from time:  ',ymdtmp,UTsectmp
+!        print*, '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
+!      end if
+!
+!      !! Set start variables accordingly and read in the milestone
+!      UTsec=UTsectmp
+!      ymd=ymdtmp
+!
+!      ! FIXME: instead keep tdur and just adjust the start time of the simulation to be closer to endtime
+!      tdur=cfg%tdur-ttmp    ! subtract off time that has elapsed to milestone
+!      ! FIXME: need to feed in the t variable and overwrite it if we are restarting.  
+!
+!      if (mpi_cfg%myid==0) then
+!        print*, 'Treating the following file as initial conditions:  ',filetmp
+!        print*, ' full duration:  ',cfg%tdur,'; remaining simulation time:  ',tdur    ! FIXME: should be tdur-t once t adjusted
+!      end if
+!
+!      if (tdur <= 1e-6_wp .and. mpi_cfg%myid==0) error stop 'Cannot restart simulation from the final time step!'
+!
+!      cfg%tdur=tdur         ! just to insure consistency
+!      call input_plasma(cfg%outdir, x%x1,x%x2all,x%x3all,cfg%indatsize,filetmp,ns,vs1,Ts,Phi,intvars%Phiall)
+!    else !! start at the beginning
+!      ! UTsec = cfg%UTsec0
+!      ! ymd = cfg%ymd0
+!      ! tdur = cfg%tdur
+!      call set_start_timefromcfg(cfg,ymd,UTsec,tdur)
+!
+!      if (tdur <= 1e-6_wp .and. mpi_cfg%myid==0) error stop 'Simulation is of zero time duration'
+!      print*, 'Starting from beginning of simulation...'
+!      call input_plasma(cfg%outdir, x%x1,x%x2all,x%x3all,cfg%indatsize,cfg%indatfile,ns,vs1,Ts,Phi,intvars%Phiall)
+!    end if
+!  end subroutine get_initial_state
+
+
+  !> load initial conditions and check if this is a restart run; set time variables accordingly
+  subroutine get_initial_state(cfg,fluidvars,electrovars,intvars,x,UTsec,ymd,tdur,t)
     type(gemini_cfg), intent(inout) :: cfg
     real(wp), dimension(:,:,:,:), pointer, intent(inout) :: fluidvars
     real(wp), dimension(:,:,:,:), pointer, intent(inout) :: electrovars
@@ -84,43 +152,46 @@ contains
     class(curvmesh), intent(in) :: x
     real(wp), intent(inout) :: UTsec
     integer, dimension(3), intent(inout) :: ymd
-    real(wp), intent(inout) :: tdur
+    real(wp), intent(inout) :: tdur,t
 
     real(wp), dimension(:,:,:,:), pointer :: ns,vs1,vs2,vs3,Ts
     real(wp), dimension(:,:,:), pointer :: E1,E2,E3,J1,J2,J3,Phi
     integer, dimension(3) :: ymdtmp
-    real(wp) :: UTsectmp,ttmp
+    real(wp) :: UTsectmp
     character(:), allocatable :: filetmp
+    real(wp) :: tremaining
 
     call fluidvar_pointers(fluidvars,ns,vs1,vs2,vs3,Ts)
     call electrovar_pointers(electrovars,E1,E2,E3,J1,J2,J3,Phi)
 
-    call find_milestone(cfg, ttmp, ymdtmp, UTsectmp, filetmp)
-    if ( ttmp > 0 ) then
-      !! restart scenario
+    call find_milestone(cfg, t, ymdtmp, UTsectmp, filetmp)
+    if ( t > 0 ) then
+      !! Set start variables accordingly and read in the milestone
+      UTsec=UTsectmp
+      ymd=ymdtmp
+
+      tremaining=cfg%tdur-t    ! subtract off time that has elapsed to milestone
+      tdur=cfg%tdur
+
       if (mpi_cfg%myid==0) then
         print*, '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
         print*, '! Restarting simulation from time:  ',ymdtmp,UTsectmp
         print*, '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
-      end if
-
-      !! Set start variables accordingly and read in the milestone
-      UTsec=UTsectmp
-      ymd=ymdtmp
-      tdur=cfg%tdur-ttmp    ! subtract off time that has elapsed to milestone
-      if (mpi_cfg%myid==0) then
         print*, 'Treating the following file as initial conditions:  ',filetmp
-        print*, ' full duration:  ',cfg%tdur,'; remaining simulation time:  ',tdur
+        print*, ' full duration:  ',cfg%tdur,'; remaining simulation time:  ',tremaining
+        print*, ' simulation start time:  ',t
+        if (tremaining<=1e-6_wp) error stop 'Cannot restart simulation from the final time step!'
       end if
 
-      if (tdur <= 1e-6_wp .and. mpi_cfg%myid==0) error stop 'Cannot restart simulation from the final time step!'
-
-      cfg%tdur=tdur         ! just to insure consistency
+      !cfg%tdur=tdur         ! just to insure consistency
       call input_plasma(cfg%outdir, x%x1,x%x2all,x%x3all,cfg%indatsize,filetmp,ns,vs1,Ts,Phi,intvars%Phiall)
     else !! start at the beginning
-      UTsec = cfg%UTsec0
-      ymd = cfg%ymd0
-      tdur = cfg%tdur
+      ! UTsec = cfg%UTsec0
+      ! ymd = cfg%ymd0
+      ! tdur = cfg%tdur
+      call set_start_timefromcfg(cfg,ymd,UTsec,tdur)
+      t=0._wp
+      tdur=cfg%tdur
 
       if (tdur <= 1e-6_wp .and. mpi_cfg%myid==0) error stop 'Simulation is of zero time duration'
       print*, 'Starting from beginning of simulation...'
@@ -207,12 +278,12 @@ contains
 
 
   !> prep simulation for use of Lagrangian grid, if needed
-  subroutine BGfield_Lagrangian(cfg,x,electrovars,intvars,v2grid,v3grid)
+  subroutine BGfield_Lagrangian(cfg,x,electrovars,intvars)
     type(gemini_cfg), intent(in) :: cfg
     class(curvmesh), intent(in) :: x
     real(wp), dimension(:,:,:,:), pointer, intent(inout) :: electrovars
     type(gemini_work), intent(inout) :: intvars
-    real(wp), intent(inout) :: v2grid,v3grid
+    real(wp) :: v2gridtmp,v3gridtmp
 
     real(wp), dimension(:,:,:), allocatable :: E01,E02,E03
     real(wp), dimension(:,:,:), pointer :: E1,E2,E3,J1,J2,J3,Phi
@@ -225,11 +296,13 @@ contains
       call get_BGEfields(x,E01,E02,E03,intvars%efield)
     end if
     if (cfg%flaglagrangian) then    ! Lagrangian (moving) grid; compute from input background electric fields
-      call grid_drift(x,E02,E03,v2grid,v3grid)
+      call grid_drift(x,E02,E03,v2gridtmp,v3gridtmp)
+      call setv2v3(v2gridtmp,v3gridtmp)
       if (mpi_cfg%myid==0) print*, mpi_cfg%myid,' using Lagrangian grid moving at:  ',v2grid,v3grid
     else                            ! stationary grid
-      v2grid = 0
-      v3grid = 0
+      v2gridtmp=0._wp
+      v3gridtmp=0._wp
+      call setv2v3(v2gridtmp,v3gridtmp)
       E1(1:lx1,1:lx2,1:lx3) = E1(1:lx1,1:lx2,1:lx3) + E01    ! FIXME: this is before dist fields are computed???
       E2(1:lx1,1:lx2,1:lx3) = E2(1:lx1,1:lx2,1:lx3) + E02
       E3(1:lx1,1:lx2,1:lx3) = E3(1:lx1,1:lx2,1:lx3) + E03
@@ -299,15 +372,15 @@ contains
 
 
   !> initialize electric field input data
-  subroutine init_Efieldinput_in(cfg,x,dt,t,intvars,ymd,UTsec)
+  subroutine init_Efieldinput_in(cfg,x,dt,intvars,ymd,UTsec)
     type(gemini_cfg), intent(in) :: cfg
     class(curvmesh), intent(in) :: x
-    real(wp), intent(in) :: dt,t
+    real(wp), intent(in) :: dt
     type(gemini_work), intent(inout) :: intvars
     integer, dimension(3), intent(in) :: ymd
     real(wp), intent(in) :: UTsec
 
-    call init_Efieldinput(dt,t,cfg,ymd,UTsec,x,intvars%efield)
+    call init_Efieldinput(dt,cfg,ymd,UTsec,x,intvars%efield)
   end subroutine init_Efieldinput_in
 
 
@@ -383,9 +456,8 @@ contains
 
 
   !> apply neutral perturbations/background and assign to main code variables
-  subroutine neutral_atmos_wind_update(intvars,v2grid,v3grid)
+  subroutine neutral_atmos_wind_update(intvars)
     type(gemini_work), intent(inout) :: intvars
-    real(wp), intent(in) :: v2grid,v3grid
 
     call neutral_denstemp_update(intvars%atmos,intvars%atmosperturb)
     call neutral_wind_update(v2grid,v3grid,intvars%atmos,intvars%atmosperturb)
@@ -393,16 +465,15 @@ contains
 
 
   !> compute neutral perturbations and apply to main code variables
-  subroutine neutral_perturb_in(cfg,intvars,x,dt,t,ymd,UTsec,v2grid,v3grid)
+  subroutine neutral_perturb_in(cfg,intvars,x,dt,t,ymd,UTsec)
     type(gemini_cfg), intent(in) :: cfg
     type(gemini_work), intent(inout) :: intvars
     class(curvmesh), intent(inout) :: x     ! unit vectors could be deallocated in this procedure
     real(wp), intent(in) :: dt,t
     integer, dimension(3), intent(in) :: ymd
     real(wp), intent(in) :: UTsec
-    real(wp), intent(in) :: v2grid,v3grid
 
-    call neutral_perturb(cfg,dt,cfg%dtneu,t,ymd,UTsec,x,v2grid,v3grid,intvars%atmos,intvars%atmosperturb)
+    call neutral_perturb(cfg,dt,t,ymd,UTsec,x,v2grid,v3grid,intvars%atmos,intvars%atmosperturb)
     call check_finite_pertub(cfg%outdir, t, mpi_cfg%myid, intvars%atmos%nn, intvars%atmos%Tn, &
                                intvars%atmos%vn1, intvars%atmos%vn2, intvars%atmos%vn3)
   end subroutine neutral_perturb_in
@@ -455,7 +526,8 @@ contains
     call check_finite_output(cfg%outdir,t,mpi_cfg%myid,vs2,vs3,ns,vs1,Ts,Phi,J1,J2,J3)
   end subroutine check_finite_output_in
 
-
+  ! FIXME:  deprecated; is easier/better just to halo all params prior to advection and interface vels
+  !           calculation...
   !> haloing for computing cell interface velocities
   subroutine halo_interface_vels_allspec_in(x,fluidvars,lsp)
     class(curvmesh), intent(in) :: x
@@ -469,28 +541,7 @@ contains
   end subroutine halo_interface_vels_allspec_in
 
 
-  !> enforce global boundary conditions
-  subroutine set_global_boundaries_allspec_in(x,fluidvars,fluidauxvars,intvars,lsp)
-    class(curvmesh), intent(in) :: x
-    real(wp), dimension(:,:,:,:), pointer, intent(inout) :: fluidvars
-    real(wp), dimension(:,:,:,:), pointer, intent(inout) :: fluidauxvars
-    type(gemini_work), intent(inout) :: intvars
-    integer, intent(in) :: lsp
-
-    real(wp), dimension(:,:,:,:), pointer :: ns,vs1,vs2,vs3,Ts
-    real(wp), dimension(:,:,:,:), pointer :: rhovs1,rhoes
-    real(wp), dimension(:,:,:), pointer :: rhov2,rhov3,B1,B2,B3,v1,v2,v3,rhom
-
-    ! bind pointers
-    call fluidvar_pointers(fluidvars,ns,vs1,vs2,vs3,Ts)
-    call fluidauxvar_pointers(fluidauxvars,rhovs1,rhoes,rhov2,rhov3,B1,B2,B3,v1,v2,v3,rhom)
-
-    ! fix global boundaries, as needed
-    call set_global_boundaries_allspec(x%flagper,ns,rhovs1,vs1,vs2,vs3,rhoes,intvars%vs1i,lsp)
-  end subroutine set_global_boundaries_allspec_in
-
-
-  !> halo all advected parameters
+  !> halo all ***advected*** parameters
   subroutine halo_allparams_in(x,fluidvars,fluidauxvars)
     class(curvmesh), intent(in) :: x
     real(wp), dimension(:,:,:,:), pointer, intent(inout) :: fluidvars
@@ -509,16 +560,49 @@ contains
   end subroutine halo_allparams_in
 
 
-  !> prepare/halo data for compression substep
-  subroutine RK2_prep_mpi_allspec_in(x,fluidvars)
-    class(curvmesh), intent(in) :: x
-    real(wp), dimension(:,:,:,:), pointer, intent(inout) :: fluidvars
+  !> halo all parameters, including velocities
+   subroutine halo_fluidvars_in(x,fluidvars,fluidauxvars)
+     class(curvmesh), intent(in) :: x
+     real(wp), dimension(:,:,:,:), pointer, intent(inout) :: fluidvars
+     real(wp), dimension(:,:,:,:), pointer, intent(inout) :: fluidauxvars
 
-    real(wp), dimension(:,:,:,:), pointer :: ns,vs1,vs2,vs3,Ts
+     real(wp), dimension(:,:,:,:), pointer :: ns,vs1,vs2,vs3,Ts
+     real(wp), dimension(:,:,:,:), pointer :: rhovs1,rhoes
+     real(wp), dimension(:,:,:), pointer :: rhov2,rhov3,B1,B2,B3,v1,v2,v3,rhom
 
-    call fluidvar_pointers(fluidvars,ns,vs1,vs2,vs3,Ts)
-    call RK2_prep_mpi_allspec(vs1,vs2,vs3,x%flagper)
-  end subroutine RK2_prep_mpi_allspec_in
+     ! bind pointers
+     call fluidvar_pointers(fluidvars,ns,vs1,vs2,vs3,Ts)
+     call fluidauxvar_pointers(fluidauxvars,rhovs1,rhoes,rhov2,rhov3,B1,B2,B3,v1,v2,v3,rhom)
+
+     ! halo all fluid parameters
+     call halo_fluidvars(ns,rhovs1,rhoes,vs2,vs3,x%flagper)
+   end subroutine halo_fluidvars_in
+
+
+  !> prepare and then halo data for compression substep
+   subroutine RK2_prep_mpi_allspec_in(x,fluidvars)
+     class(curvmesh), intent(in) :: x
+     real(wp), dimension(:,:,:,:), pointer, intent(inout) :: fluidvars
+     real(wp), dimension(:,:,:,:), pointer :: ns,vs1,vs2,vs3,Ts
+     real(wp), dimension(-1:x%lx1+2,-1:x%lx2+2,-1:x%lx3+2) :: param
+     integer :: isp,lsp
+
+     call fluidvar_pointers(fluidvars,ns,vs1,vs2,vs3,Ts)
+     lsp=size(ns,4)
+     call RK2_prep_mpi_allspec(vs1,vs2,vs3,x%flagper)
+   end subroutine RK2_prep_mpi_allspec_in
+
+
+  !> prepare data for compression substep deal with global boundaries
+   subroutine RK2_global_boundary_allspec_in(x,fluidvars)
+     class(curvmesh), intent(in) :: x
+     real(wp), dimension(:,:,:,:), pointer, intent(inout) :: fluidvars
+
+     real(wp), dimension(:,:,:,:), pointer :: ns,vs1,vs2,vs3,Ts
+
+     call fluidvar_pointers(fluidvars,ns,vs1,vs2,vs3,Ts)
+     call RK2_global_boundary_allspec(vs1,vs2,vs3,x%flagper)
+   end subroutine RK2_global_boundary_allspec_in
 
 
   !> agree on average value of gravity and exospheric temp
