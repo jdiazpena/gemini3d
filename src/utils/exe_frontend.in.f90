@@ -5,17 +5,17 @@ use, intrinsic :: iso_fortran_env, only : compiler_version, stderr=>error_unit, 
 use phys_consts, only : wp
 use gemini3d_config, only : gemini_cfg, read_configfile
 use gemini3d_sysinfo, only : get_compiler_vendor
-use filesystem, only : parent, file_name, assert_is_dir, expanduser, suffix
+use filesystem, only : parent, assert_is_dir, expanduser, remove
 use timeutils, only : date_filename,dateinc
 
 implicit none (type, external)
 private
 public :: clean_output, cli_parser, get_Ncpu, help_gemini_bin, help_gemini_run, help_magcalc_bin, help_magcalc_run
 
-interface
+interface !< cpu_count.cpp
 integer(c_int) function cpu_count_c() bind(c, name="cpu_count")
 import c_int
-end function cpu_count_c
+end function
 end interface
 
 contains
@@ -358,17 +358,17 @@ call read_configfile(cfg)
 ymd = cfg%ymd0
 UTsec = cfg%UTsec0
 
-fn = date_filename(cfg%outdir, ymd, UTsec) // suffix(cfg%indatsize)
+fn = date_filename(cfg%outdir, ymd, UTsec) // ".h5"
 
 do
   !! new filename, add the 1 if it is the first
-  fn = date_filename(cfg%outdir, ymd, UTsec) // suffix(cfg%indatsize)
+  fn = date_filename(cfg%outdir, ymd, UTsec) // ".h5"
 
   inquire(file=fn, exist=exists)
   if ( .not. exists ) exit
   !! last output file
   print *, 'delete: ', fn
-  call unlink(fn)
+  call remove(fn)
 
   !! next time
   call dateinc(cfg%dtout, ymd,UTsec)
@@ -376,17 +376,5 @@ end do
 
 end subroutine clean_output
 
-
-subroutine unlink(path)
-character(*), intent(in) :: path
-integer :: i
-logical :: e
-
-inquire(file=path, exist=e)
-if (.not.e) return
-
-open(newunit=i, file=path, status='old')
-close(i, status='delete')
-end subroutine unlink
 
 end module exe_frontend

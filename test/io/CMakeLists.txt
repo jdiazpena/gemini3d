@@ -1,13 +1,12 @@
-set_directory_properties(PROPERTIES LABELS io)
+set_property(DIRECTORY PROPERTY LABELS io)
 
-cmake_path(SET _test_file ${PROJECT_SOURCE_DIR}/test/config/config_example.nml)
+set(_test_file ${PROJECT_SOURCE_DIR}/test/config/config_example.nml)
 
 add_executable(test_namelist test_nml.f90)
 add_test(NAME Fortran_namelist COMMAND test_namelist ${_test_file})
 set_tests_properties(Fortran_namelist PROPERTIES
 REQUIRED_FILES ${_test_file}
 LABELS unit
-TIMEOUT 10
 )
 
 
@@ -20,14 +19,10 @@ endif()
 add_executable(test_dump_write test_dump_write.f90)
 target_link_libraries(test_dump_write PRIVATE errors const
 h5fortran::h5fortran
-$<$<BOOL:${HDF5_HAVE_PARALLEL}>:MPI::MPI_Fortran>
 )
 
 add_executable(test_dump_read test_dump_read.f90)
-target_link_libraries(test_dump_read PRIVATE
-h5fortran::h5fortran
-$<$<BOOL:${HDF5_HAVE_PARALLEL}>:MPI::MPI_Fortran>
-)
+target_link_libraries(test_dump_read PRIVATE h5fortran::h5fortran)
 
 foreach(t root worker input)
   set(f ${CMAKE_CURRENT_BINARY_DIR}/dump_${t}.h5)
@@ -37,7 +32,6 @@ foreach(t root worker input)
   FIXTURES_SETUP gemini:dump_fxt
   WILL_FAIL true
   LABELS unit
-  TIMEOUT 10
   )
 
   add_test(NAME gemini:dump:check:${t} COMMAND test_dump_read testing:${t} ${f})
@@ -45,7 +39,6 @@ foreach(t root worker input)
   FIXTURES_REQUIRED gemini:dump_fxt
   REQUIRED_FILES ${f}
   LABELS unit
-  TIMEOUT 10
   )
 
   dll_test_path("h5fortran::h5fortran;HDF5::HDF5" "gemini:dump:${t};gemini:dump:check:${t}")

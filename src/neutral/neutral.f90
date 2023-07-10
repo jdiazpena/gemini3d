@@ -54,19 +54,16 @@ end interface
 
 contains
   !> initializes neutral atmosphere by:
-  !    1)  allocating storage space
-  !    2)  establishing initial background for density, temperature, and winds
+  !    1)  establishing initial background for density, temperature, and winds
   !! Arguably this should be called for init and for neutral updates, except for the allocation part...
-  subroutine init_neutralBG(dt,t,cfg,ymd,UTsec,x,v2grid,v3grid,atmos)
-    real(wp), intent(in) :: dt,t
+  subroutine init_neutralBG(cfg,ymd,UTsec,x,v2grid,v3grid,atmos)
+
     type(gemini_cfg), intent(in) :: cfg
     integer, dimension(3), intent(in) :: ymd
     real(wp), intent(in) :: UTsec
     class(curvmesh), intent(inout) :: x    ! unit vecs may be deallocated after first setup
     real(wp), intent(in) :: v2grid,v3grid
     type(neutral_info), intent(inout) :: atmos
-    integer, dimension(3) :: ymdtmp
-    real(wp) :: UTsectmp
     real(wp) :: tstart,tfin
 
     !! allocation neutral module scope variables so there is space to store all the file input and do interpolations
@@ -75,7 +72,8 @@ contains
     !! call msis to get an initial neutral background atmosphere
     !if (mpi_cfg%myid == 0) call cpu_time(tstart)
     call cpu_time(tstart)
-    call neutral_atmos(cfg%ymd0,cfg%UTsec0,x%glat,x%glon,x%alt,cfg%activ,cfg%msis_version,atmos)
+    call neutral_atmos(cfg%ymd0,cfg%UTsec0,x%glat(1:lx1,1:lx2,1:lx3),x%glon(1:lx1,1:lx2,1:lx3),x%alt(1:lx1,1:lx2,1:lx3), &
+                         cfg%activ,cfg%msis_version,atmos)
     call neutralBG_denstemp(atmos)
     !if (mpi_cfg%myid == 0) then
       call cpu_time(tfin)
@@ -131,7 +129,6 @@ contains
     type(neutral_info), intent(inout) :: atmos
     logical, intent(in), optional :: flagBG
     real(wp), dimension(1:size(vnalt,1),1:size(vnalt,2),1:size(vnalt,3),3) :: ealt,eglat,eglon
-    integer :: lx1,lx2,lx3
 
     !> if first time called then allocate space for projections and compute
     if (.not. atmos%flagprojections) then
@@ -201,7 +198,7 @@ contains
     allocate(atmos%nn(lx1,lx2,lx3,lnchem),atmos%Tn(lx1,lx2,lx3),atmos%vn1(lx1,lx2,lx3), &
                atmos%vn2(lx1,lx2,lx3),atmos%vn3(lx1,lx2,lx3))
 
-    ! allocate and compute plasma grid z,rho locations and space to save neutral perturbation variables and projection factors
+    ! allocate space for background atmospheric state
     allocate(atmos%nnmsis(lx1,lx2,lx3,lnchem),atmos%Tnmsis(lx1,lx2,lx3), &
                atmos%vn1base(lx1,lx2,lx3),atmos%vn2base(lx1,lx2,lx3),atmos%vn3base(lx1,lx2,lx3))
 
@@ -217,6 +214,7 @@ contains
     atmos%vn2base = 0
     atmos%vn3base = 0
 
+    ! projection factors for geographic rotations
     allocate(atmos%proj_ealt_e1(lx1,lx2,lx3),atmos%proj_eglat_e1(lx1,lx2,lx3),atmos%proj_eglon_e1(lx1,lx2,lx3))
     allocate(atmos%proj_ealt_e2(lx1,lx2,lx3),atmos%proj_eglat_e2(lx1,lx2,lx3),atmos%proj_eglon_e2(lx1,lx2,lx3))
     allocate(atmos%proj_ealt_e3(lx1,lx2,lx3),atmos%proj_eglat_e3(lx1,lx2,lx3),atmos%proj_eglon_e3(lx1,lx2,lx3))
@@ -234,11 +232,9 @@ contains
     deallocate(atmos%nnmsis,atmos%Tnmsis,atmos%vn1base,atmos%vn2base,atmos%vn3base)
 
     ! rotations of neutral winds
-    if (atmos%flagprojections) then
-      deallocate(atmos%proj_ealt_e1,atmos%proj_eglat_e1,atmos%proj_eglon_e1)
-      deallocate(atmos%proj_ealt_e2,atmos%proj_eglat_e2,atmos%proj_eglon_e2)
-      deallocate(atmos%proj_ealt_e3,atmos%proj_eglat_e3,atmos%proj_eglon_e3)
-      atmos%flagprojections=.false.
-    end if
+    deallocate(atmos%proj_ealt_e1,atmos%proj_eglat_e1,atmos%proj_eglon_e1)
+    deallocate(atmos%proj_ealt_e2,atmos%proj_eglat_e2,atmos%proj_eglon_e2)
+    deallocate(atmos%proj_ealt_e3,atmos%proj_eglat_e3,atmos%proj_eglon_e3)
+    atmos%flagprojections=.false.
   end subroutine neutral_info_dealloc
 end module neutral

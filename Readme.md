@@ -50,11 +50,11 @@ Gemini3D works "offline" that is without internet once initially setup.
 
 Requirements:
 
-* C++17 and Fortran 2008 compiler. See [compiler help](./docs/Readme_compilers.md) for optional further details.
-  * GCC 8 and newer
-  * Clang 7 and newer
+* C, C++ and Fortran compiler. See [compiler help](./docs/Readme_compilers.md) for optional further details.
+  * GCC &ge; 9 with OpenMPI or MPICH
+  * Clang with OpenMPI
   * Intel oneAPI
-  * Cray with GCC backend
+  * Cray with GCC or Intel oneAPI backend
 * Python and/or MATLAB for scripting front- and back-ends
 * CMake: if your CMake is too old, [download](https://cmake.org/download/) or `python -m pip install cmake`
 * MPI: any of OpenMPI, IntelMPI, MPICH, MS-MPI. See [MPI help](./docs/Readme_mpi.md) if needed. Without MPI, Gemini3D uses one CPU core only, which runs much more slowly than with MPI.
@@ -111,7 +111,7 @@ Build the Gemini3D code
 Non-default [build options](./docs/Readme_cmake.md) may be used.
 
 GEMINI has self tests that compare the output from a "known" test problem to a reference output.
-To verify your GEMINI build, run the self-tests:
+To verify your GEMINI build, run the self-tests.
 
 ```sh
 ctest --test-dir build

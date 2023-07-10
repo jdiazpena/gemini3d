@@ -20,10 +20,12 @@ add_subdirectory(neutral)
 add_subdirectory(sources)
 
 add_library(multifluid_mpi OBJECT multifluid/multifluid_mpi.f90)
-target_link_libraries(multifluid_mpi PRIVATE const mpimod grid_mpi advec_mpi)
-add_library(multifluid OBJECT multifluid/multifluid.f90)
+target_link_libraries(multifluid_mpi PRIVATE const mpimod advec_mpi)
+add_library(multifluid OBJECT multifluid/multifluid.f90
+$<TARGET_OBJECTS:grid>
+)
 target_link_libraries(multifluid PRIVATE
-advec calculus collision const diffusion grid meshobj precipdata ionization precipBCs sources timeutils gemini3d_config
+advec calculus collision const diffusion meshobj precipdata ionization precipBCs sources timeutils gemini3d_config
 )
 
 add_subdirectory(utils)
@@ -35,15 +37,15 @@ configure_file(gemini_cli.in.f90 gemini_cli.f90 @ONLY)
 
 add_library(gemini3d libgemini.f90 gemini_init.f90
 ${CMAKE_CURRENT_BINARY_DIR}/gemini_cli.f90
+$<TARGET_OBJECTS:exe_frontend>
 )
 target_include_directories(gemini3d PUBLIC
-$<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
+"$<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include;${MPI_Fortran_INCLUDE_DIRS}>"
 $<INSTALL_INTERFACE:include>
 )
 target_link_libraries(gemini3d PUBLIC
 h5fortran::h5fortran
-MPI::MPI_Fortran
-$<$<NOT:$<BOOL:${mpi}>>:MUMPS::MPISEQ>
+${MPI_Fortran_LIBRARIES}
 $<$<BOOL:${glow}>:glow::glow>
 $<$<BOOL:${hwm14}>:hwm14::hwm_ifc>
 msis::msis_ifc
@@ -70,19 +72,22 @@ ionization
 inputdata precipdata efielddata
 gemini3d_sysinfo
 neutral
-neutraldata neutraldata3D_mpi neutraldata3D_geom_mpi neutraldata3D_geog_mpi neutraldata2D neutraldata2Daxisymm neutraldata2Dcart
+neutraldata neutraldata3D neutraldata3D_fclaw neutraldata3D_fclaw_axisymm neutraldata3D_fclaw_3Dx 
+neutraldata3D_mpi neutraldata3D_geom_mpi neutraldata3D_geog_mpi 
+neutraldata2D neutraldata2Daxisymm neutraldata2Dcart 
 meshobj meshobj_cart meshobj_dipole spherical newton geomagnetic
 multifluid
 PDEparabolic gbsv
-precipBCs reader sanity_check errors sources timeutils
+precipBCs reader sanity_check errors sources temporal timeutils
 exe_frontend
-grid
+grid io
 mpimod
 autogrid
+io_nompi
+potential_nompi
 )
 
 set(gemini_mpi_internal_mods
-gemini3d
 advec
 advec_mpi
 calculus gemini3d_config
@@ -94,15 +99,17 @@ ionization_mpi
 inputdata precipdata efielddata
 gemini3d_sysinfo
 neutral
-neutraldata neutraldata3D_mpi neutraldata3D_geom_mpi neutraldata3D_geog_mpi neutraldata2D neutraldata2Daxisymm neutraldata2Dcart
+neutraldata neutraldata3D neutraldata3D_fclaw neutraldata3D_fclaw_axisymm neutraldata3D_fclaw_3Dx 
+neutraldata3D_mpi neutraldata3D_geom_mpi neutraldata3D_geog_mpi 
+neutraldata2D neutraldata2Daxisymm neutraldata2Dcart 
 meshobj meshobj_cart meshobj_dipole spherical newton geomagnetic
 multifluid
 multifluid_mpi
 neutral_perturbations
 PDEparabolic gbsv
-precipBCs reader sanity_check errors sources sources_mpi temporal timeutils
+precipBCs reader sanity_check errors sources sources_mpi temporal_mpi timeutils
 exe_frontend
-grid grid_mpi io
+grid io
 PDEelliptic potential mumps_interface
 mpimod
 autogrid
@@ -120,8 +127,6 @@ gemini3d_mpi
 gemini3d
 h5fortran::h5fortran
 MUMPS::MUMPS
-$<$<NOT:$<BOOL:${mpi}>>:MUMPS::MPISEQ>
-"$<$<BOOL:${MUMPS_HAVE_Scotch}>:Scotch::Scotch;METIS::METIS>"
 $<$<BOOL:${glow}>:glow::glow>
 $<$<BOOL:${hwm14}>:hwm14::hwm_ifc>
 ffilesystem::filesystem
@@ -183,6 +188,8 @@ foreach(l IN LISTS gemini_internal_mods)
   endforeach()
 endforeach()
 
+target_link_libraries(gemini3d_mpi PRIVATE gemini3d)
+
 foreach(l IN LISTS gemini_mpi_internal_mods)
   target_sources(gemini3d_mpi PRIVATE $<TARGET_OBJECTS:${l}>)
 endforeach()
@@ -196,9 +203,6 @@ if(cpp)
 # --- Gemini_c.bin
 # C++ main program just like Fortran gemini.bin
 
-find_package(iniparser CONFIG REQUIRED)
-# for gemini_c C++ front end
-
 add_library(gemini3d_cpp libgemini.cpp)
 target_include_directories(gemini3d_cpp PUBLIC
 $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
@@ -211,7 +215,6 @@ gemini3d_c
 h5fortran::h5fortran
 MUMPS::MUMPS
 MPI::MPI_CXX
-"$<$<BOOL:${MUMPS_HAVE_Scotch}>:Scotch::Scotch;METIS::METIS>"
 $<$<BOOL:${glow}>:glow::glow>
 iniparser::iniparser
 ffilesystem::filesystem
@@ -222,6 +225,7 @@ $<$<BOOL:${MSVC}>:_CRT_SECURE_NO_WARNINGS>
 #$<$<BOOL:${MSVC}>:_ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH>
 #$<$<BOOL:${MSVC}>:_HAS_ITERATOR_DEBUGGING=1>
 #$<$<BOOL:${MSVC}>:_ITERATOR_DEBUG_LEVEL=2>
+install(TARGETS gemini3d_cpp EXPORT ${PROJECT_NAME}-targets)
 
 add_executable(gemini_c.bin ${PROJECT_SOURCE_DIR}/app/main.cpp)
 set_target_properties(gemini_c.bin PROPERTIES
@@ -246,8 +250,6 @@ target_compile_definitions(gemini_c.bin PRIVATE
 $<$<BOOL:${MSVC}>:_CRT_SECURE_NO_WARNINGS>
 )
 
-install(TARGETS gemini_c.bin gemini3d_cpp
-EXPORT ${PROJECT_NAME}-targets
-)
+install(TARGETS gemini_c.bin EXPORT ${PROJECT_NAME}-targets)
 
 endif(cpp)

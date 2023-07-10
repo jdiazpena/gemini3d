@@ -5,6 +5,7 @@ use phys_consts, only: wp, lsp, ln, ms, mn, kb, pi, elchrg, qs, debug
 use gemini3d_config, only: gemini_cfg
 use meshobj, only : curvmesh
 
+
 implicit none (type, external)
 private
 public :: thermal_conduct, conductivities, capacitance, maxwell_colln, coulomb_colln, NLConductivity
@@ -70,7 +71,6 @@ real(wp), dimension(1:size(Tn,1),1:size(Tn,2),1:size(Tn,3)), intent(inout) :: nu
 !! intent(out)
 
 integer :: lx1,lx2,lx3
-real(wp) :: mred
 real(wp),dimension(1:size(Tn,1),1:size(Tn,2),1:size(Tn,3)) :: Teff
 
 lx1=size(Ts,1)-4
@@ -130,8 +130,8 @@ real(wp), dimension(1:size(Ts,1)-4,1:size(Ts,2)-4,1:size(Ts,3)-4), intent(inout)
 !! intent(out)
 integer :: lx1,lx2,lx3
 real(wp) :: mred
-real(wp),dimension(1:size(Ts,1)-4,1:size(Ts,2)-4,1:size(Ts,3)-4) &
-          :: Teff,Wsj,Phitmp
+real(wp),dimension(1:size(Ts,1)-4, 1:size(Ts,2)-4, 1:size(Ts,3)-4) &
+          :: Teff,Wsj
 
 
 lx1=size(Ts,1)-4
@@ -219,7 +219,6 @@ real(wp), dimension(1:size(ns,1)-4,1:size(ns,2)-4,1:size(ns,3)-4,lsp), intent(in
 real(wp), dimension(1:size(ns,1)-4,1:size(ns,2)-4,1:size(ns,3)-4), intent(inout) :: sigPgrav,sigHgrav
 !! intent(out)
 
-
 integer :: isp,isp2,lx1,lx2,lx3
 real(wp), dimension(1:size(ns,1)-4,1:size(ns,2)-4,1:size(ns,3)-4) :: OMs
 real(wp), dimension(1:size(ns,1)-4,1:size(ns,2)-4,1:size(ns,3)-4) :: nuej,Phisj,Psisj,nutmp,mupar,mubase,rho
@@ -306,19 +305,15 @@ do isp=1,lsp
   sigHgrav=sigHgrav+rho*muH(:,:,:,isp)
 end do
 
-
-! Use sigP and sigH to compute sigNCP sigNCH
-
-
 end subroutine conductivities
 
-subroutine NLConductivity(nn,Tn,ns,Ts,E1,E2,E3,x,sigP,sigH,sigNCP,sigNCH)
+subroutine NLConductivity(nn,Tn,ns,Ts,E2,E3,x,sigP,sigH,sigNCP,sigNCH)
 !! Inputs Needed
 real(wp), dimension(:,:,:,:), intent(in) :: nn !Neutral density
 real(wp), dimension(:,:,:), intent(in) :: Tn !neutral temperature
 real(wp), dimension(:,:,:), intent(in) :: sigP,sigH !linear conductivities
 real(wp), dimension(-1:,-1:,-1:,:), intent(in) :: ns,Ts !Plasma density and temperature
-real(wp), dimension(-1:,-1:,-1:), intent(in) :: E1,E2,E3 !Electric Field
+real(wp), dimension(-1:,-1:,-1:), intent(in) :: E2,E3 !Electric Field
 class(curvmesh), intent(in) :: x !Grid, doing this because BMAG is stored here, added at the top of the file too
 
 !! intent(out)
@@ -333,13 +328,15 @@ real(wp), dimension(size(Ts,1)-4,size(Ts,2)-4,size(Ts,3)-4,2) :: nuAvg, msAvg, T
 real(wp), dimension(size(Ts,1)-4,size(Ts,2)-4,size(Ts,3)-4) :: Bmagnitude, nu, nsAvg, omegae, omegai, ki, ke, phi
 real(wp), dimension(size(Ts,1)-4,size(Ts,2)-4,size(Ts,3)-4) :: Eth0, Ethreshold, Emagnitude, commonfactor
 real(wp), dimension(size(Ts,1)-4,size(Ts,2)-4,size(Ts,3)-4) :: outputtest
+integer, dimension(size(Ts,1)-4,size(Ts,2)-4,size(Ts,3)-4) :: FBIbinary
+
 
 !!Start
 lx1=x%lx1
 lx2=x%lx2
 lx3=x%lx3
 Bmagnitude=x%Bmag(1:lx1,1:lx2,1:lx3)
-Emagnitude=sqrt(E1(1:lx1,1:lx2,1:lx3)**2+E2(1:lx1,1:lx2,1:lx3)**2+E3(1:lx1,1:lx2,1:lx3)**2) !!Already evaluated with no ghost cells
+Emagnitude=sqrt(E2(1:lx1,1:lx2,1:lx3)**2+E3(1:lx1,1:lx2,1:lx3)**2) !!Already evaluated with no ghost cells
 
 !!Initialize arrays as 0s
 nuAvg=0.0_wp
@@ -349,6 +346,8 @@ nsAvg=0.0_wp
 TsAvg=0.0_wp
 sigNCH=0.0_wp
 sigNCP=0.0_wp
+FBIbinary=1
+
 
 !MassDensity Weight of Neutrals
 do isp2=1,ln
@@ -407,21 +406,21 @@ TsAvg(:,:,:,2)=Ts(1:lx1,1:lx2,1:lx3,lsp)
 Eth0=20.0_wp*SQRT((TsAvg(:,:,:,1)+TsAvg(:,:,:,2))/600.0_wp)*(Bmagnitude/5.0e-5_wp) !B is written as 5e4nT, to T
 Ethreshold=(1.0_wp+phi)*SQRT((1.0_wp+ki**2)/(1.0_wp-ki**2))*Eth0*1.0e-3_wp !the 1e-3 is needed since this eq gives mV/m, not V/m
 
-commonfactor=(Emagnitude/Ethreshold-1)*(1-Ethreshold/Emagnitude)
-
-sigNCP=(1-ki**2)*commonfactor*sigP/(1+ki**2)
-sigNCH=-(2*ki)*(1+phi)*commonfactor*sigH/(1+ki**2)
-
+!Create matrix of 1 and 0s where FBI is possible, FBIbinary starts with all 1's meaning FBI everywhere
 where (Emagnitude<=Ethreshold) !Anything without a sufficiente E field gets back to normal.
-  sigNCP=0.0_wp
-  sigNCH=0.0_wp
+  FBIbinary=0
 end where
 
-where (ki>=1.0_wp) !Anything where ions are magnetized also goes back to normal
-  sigNCP=0.0_wp
-  sigNCH=0.0_wp
+where (ki>1.0_wp) !Anything where ions are magnetized also goes back to normal
+  FBIbinary=0
 end where
 
+!Calculate conductivity term only where FBI is possible
+where (FBIbinary==1)
+  commonfactor=(Emagnitude/Ethreshold-1)*(1-Ethreshold/Emagnitude)
+  sigNCP=(1-ki**2)*commonfactor*sigP/(1+ki**2)
+  sigNCH=-(2*ki)*(1+phi)*commonfactor*sigH/(1+ki**2)
+end where
 
 end subroutine NLConductivity
 

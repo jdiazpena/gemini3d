@@ -4,21 +4,18 @@ gemini_compare.f90 compare.f90 compare_grid_h5.f90 compare_out_h5.f90 compare_in
 )
 target_link_libraries(gemini3d.compare PRIVATE
 assert gemini3d_config reader timeutils const gemini3d_sysinfo
-h5fortran::h5fortran
-$<$<BOOL:${HDF5_HAVE_PARALLEL}>:MPI::MPI_Fortran>
 ffilesystem::filesystem
+h5fortran::h5fortran
 )
 if(CMAKE_Fortran_COMPILER_ID MATCHES "^Intel")
-  set_target_properties(gemini3d.compare PROPERTIES LINKER_LANGUAGE Fortran)
+  set_property(TARGET gemini3d.compare PROPERTY LINKER_LANGUAGE Fortran)
 else()
-  set_target_properties(gemini3d.compare PROPERTIES LINKER_LANGUAGE CXX)
+  set_property(TARGET gemini3d.compare PROPERTY LINKER_LANGUAGE CXX)
 endif()
 
-set_target_properties(gemini3d.compare PROPERTIES
-RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}
-DEBUG_POSTFIX .debug
-RELWITHDEBINFO_POSTFIX .debug
-)
+set_property(TARGET gemini3d.compare PROPERTY RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR})
+set_property(TARGET gemini3d.compare PROPERTY DEBUG_POSTFIX .debug)
+set_property(TARGET gemini3d.compare PROPERTY RELWITHDEBINFO_POSTFIX .debug)
 
 # --- Install
 
@@ -37,7 +34,6 @@ WORKING_DIRECTORY ${matgemini_SOURCE_DIR}
 )
 
 set_tests_properties(gemini:compare:${name}:matlab PROPERTIES
-TIMEOUT 120
 FIXTURES_REQUIRED "${name}:run_fxt"
 REQUIRED_FILES "${outdir}/inputs/config.nml;${refdir}/inputs/config.nml"
 ENVIRONMENT "MATLABPATH=${MATLABPATH}"
@@ -53,7 +49,6 @@ add_test(NAME gemini:compare:${name}:python
 COMMAND ${Python_EXECUTABLE} -m gemini3d.compare ${outdir} ${refdir} -file_format h5)
 
 set_tests_properties(gemini:compare:${name}:python PROPERTIES
-TIMEOUT 120
 FIXTURES_REQUIRED ${name}:run_fxt
 REQUIRED_FILES "${outdir}/inputs/config.nml;${refdir}/inputs/config.nml"
 LABELS "compare;python"
@@ -69,7 +64,6 @@ add_test(NAME gemini:compare:${name}
 COMMAND gemini3d.compare ${outdir} ${refdir})
 
 set_tests_properties(gemini:compare:${name} PROPERTIES
-TIMEOUT 60
 FIXTURES_REQUIRED ${name}:run_fxt
 RESOURCE_LOCK $<$<BOOL:${WIN32}>:cpu_mpi>
 REQUIRED_FILES "${outdir}/inputs/config.nml;${refdir}/inputs/config.nml"

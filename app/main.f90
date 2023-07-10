@@ -17,29 +17,32 @@ program Gemini3D_main
 use, intrinsic :: iso_c_binding, only : c_char, c_null_char, c_int, c_bool, c_float, c_ptr
 use, intrinsic :: iso_fortran_env, only : stderr=>error_unit
 use phys_consts, only : wp, debug
-use mpi, only: MPI_COMM_WORLD
+use mpi_f08, only: MPI_COMM_WORLD, mpi_init,mpi_finalize,mpi_comm_rank
 
 !> type definitions
 use meshobj, only: curvmesh
 use gemini3d_config, only: gemini_cfg
 
 !> main gemini libraries
-use gemini3d, only: c_params,cli_config_gridsize,gemini_alloc,gemini_dealloc,init_precipinput_in,msisinit_in, &
-                      set_start_values, init_neutralBG_in, set_update_cadence, neutral_atmos_winds, get_solar_indices, &
+use gemini3d, only: c_params,gemini_alloc,gemini_dealloc,init_precipinput_in,msisinit_in, &
+                      set_start_values_auxtimevars, set_start_values_auxvars, init_neutralBG_in, &
+                      set_update_cadence, neutral_atmos_winds, get_solar_indices, &
                       v12rhov1_in,T2rhoe_in,interface_vels_allspec_in, sweep3_allparams_in, &
                       sweep1_allparams_in, sweep2_allparams_in, &
                       rhov12v1_in, VNRicht_artvisc_in, compression_in, rhoe2T_in, clean_param_in, energy_diffusion_in, &
                       source_loss_allparams_in,dateinc_in,get_subgrid_size, get_fullgrid_size, &
-                      get_config_vars, get_species_size, gemini_work
+                      get_config_vars, get_species_size, gemini_work, gemini_cfg_alloc, cli_in, read_config_in, &
+                      gemini_cfg_dealloc, grid_size_in, gemini_double_alloc, gemini_work_alloc, gemini_double_dealloc, &
+                      gemini_work_dealloc, set_global_boundaries_allspec_in
 use gemini3d_mpi, only: init_procgrid,outdir_fullgridvaralloc,read_grid_in,get_initial_state,BGfield_Lagrangian, &
                           check_dryrun,check_fileoutput,get_initial_drifts,init_Efieldinput_in,pot2perpfield_in, &
                           init_neutralperturb_in, dt_select, neutral_atmos_wind_update, neutral_perturb_in, &
                           electrodynamics_in, check_finite_output_in, halo_interface_vels_allspec_in, &
-                          set_global_boundaries_allspec_in, halo_allparams_in, RK2_prep_mpi_allspec_in, get_gavg_Tinf_in, &
-                          clear_dneu_in,mpisetup_in,mpiparms
+                          halo_allparams_in, RK2_prep_mpi_allspec_in, get_gavg_Tinf_in, &
+                          clear_dneu_in,mpisetup_in,mpiparms, calc_subgrid_size_in, halo_fluidvars_in, &
+                          RK2_global_boundary_allspec_in
 
 implicit none (type, external)
-external :: mpi_init,mpi_finalize,mpi_comm_rank
 
 integer(c_int) :: lid2in, lid3in
 character(8) :: date
@@ -49,8 +52,7 @@ type(c_params) :: p
 integer :: myid
 
 !> initialize mpi
-call mpi_init(ierr)
-if (ierr/=0) error stop 'gemini.bin: failed mpi_init'
+call mpi_init()
 p%fortran_cli = .true.
 p%fortran_nml = .true.
 p%out_dir(1) = c_null_char
@@ -77,7 +79,6 @@ contains
     type(c_params), intent(in) :: p
     !! output directory for Gemini3D to write simulation data to (can be large files GB, TB, ...)
     integer(c_int), intent(inout) :: lid2in, lid3in  !< inout to allow optional CLI
-    integer :: ierr
 
     !> VARIABLES READ IN FROM CONFIG FILE
     real(wp) :: UTsec
@@ -102,27 +103,44 @@ contains
     !> Temporary variable for toggling full vs. other output
     integer :: flagoutput
     real(wp) :: tmilestone = 0
-    !> Describing Lagrangian grid (if used)
-    real(wp) :: v2grid,v3grid
     integer :: lx1,lx2,lx3,lx2all,lx3all,lsp
     logical :: flagneuBG
     integer :: flagdneu
     real(wp) :: dtneu,dtneuBG
     integer :: myid,lid
 
-    !> Simulation data
+    !> Simulation data, because these are all intended to be interoperable with C/CXX
+    !    these should all be pointers, i.e. they should be allocated through specific
+    !    calls and not static; this way both C and fortran main programs allocate and
+    !    access these variables in analogous ways.
     real(wp), dimension(:,:,:,:), pointer :: fluidvars
     real(wp), dimension(:,:,:,:), pointer :: fluidauxvars
     real(wp), dimension(:,:,:,:), pointer :: electrovars
     class(curvmesh), pointer :: x
-    type(gemini_cfg) :: cfg
-    type(gemini_work) :: intvars
+    type(gemini_cfg), pointer :: cfg
+    type(gemini_work), pointer :: intvars
 
     !> initialize message passing.  FIXME: needs to be msissetup_C()
     call mpisetup_in()
     call mpiparms(myid,lid)
     if(lid < 1) error stop 'number of MPI processes must be >= 1. Was MPI initialized properly?'
-    call cli_config_gridsize(p,lid2in,lid3in,cfg)
+
+    !> command line interface
+    !call cli_config_gridsize(p,lid2in,lid3in,cfg)
+
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    ! Allocations happen during this block
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    cfg=>gemini_cfg_alloc()
+    call cli_in(p,lid2in,lid3in,cfg)     ! transfers some data from p into cfg so cfg must be allocated prior to calling
+
+    !> read in config file and add contents to cfg
+    call read_config_in(p,cfg)           ! read configuration file and add information to cfg
+
+    !> allocations depend on grid size so read that into our module variables
+    call grid_size_in(cfg)               ! retrieve the total grid size form the input filename stored in cfg
+
+    !> retrieve some needed module-scope variables
     call get_fullgrid_size(lx1,lx2all,lx3all)
     call get_config_vars(cfg,flagneuBG,flagdneu,dtneuBG,dtneu)
 
@@ -130,38 +148,43 @@ contains
     !    to workers
     call init_procgrid(lx2all,lx3all,lid2in,lid3in)
 
-    !> load the grid data from the input file and store in gemini module
-    call read_grid_in(cfg,x)
-    print*, 'Done with read_grid_in...'
+    !> At this point all module variables are in a state where we can set the subgrid sizes
+    call calc_subgrid_size_in(lx2all,lx3all)
 
     !> Sizes of state variable
     call get_subgrid_size(lx1,lx2,lx3)
     call get_species_size(lsp)
 
-    !> Allocate space for solutions, sizes will be pulled from internal modules
-    print*, 'Pointer 1:  ',associated(intvars%atmosperturb)
-    call gemini_alloc(cfg,fluidvars,fluidauxvars,electrovars,intvars)
-    print*, 'Pointer 2:  ',associated(intvars%atmosperturb)
+    !> Allocate space for solutions, sizes will be pulled from internal modules, can happen once lx1,2,3,2all,3all defined
+    !call gemini_alloc(cfg,fluidvars,fluidauxvars,electrovars,intvars)
+    call gemini_double_alloc(fluidvars,fluidauxvars,electrovars)
+    intvars=>gemini_work_alloc(cfg)
 
     !> root creates a place to put output and allocates any needed fullgrid arrays for plasma state variables
     call outdir_fullgridvaralloc(cfg,intvars,lx1,lx2all,lx3all)
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+    !> load the grid data from the input file and store in gemini module
+    call read_grid_in(cfg,x)
+    print*, 'Done with read_grid_in...'
 
     !> Set initial time variables to simulation; this requires detecting whether we are trying to restart a simulation run
     call get_initial_state(cfg,fluidvars,electrovars,intvars,x,UTsec,ymd,tdur)
 
     !> initialize time stepping and some aux variables
-    call set_start_values(it,t,tout,tglowout,tneuBG,x,fluidauxvars)
+    call set_start_values_auxtimevars(it,t,tout,tglowout,tneuBG)
+    call set_start_values_auxvars(x,fluidauxvars)
 
     !> Electric field input setup
     if(myid==0) print*, 'Priming electric field input'
-    call init_Efieldinput_in(cfg,x,dt,t,intvars,ymd,UTsec)
+    call init_Efieldinput_in(cfg,x,dt,intvars,ymd,UTsec)
 
     !> Recompute electrodynamic quantities needed for restarting
     !> these do not include background
     call pot2perpfield_in(x,electrovars)
 
     !> Get the background electric fields and compute the grid drift speed if user selected lagrangian grid, add to total field
-    call BGfield_Lagrangian(cfg,x,electrovars,intvars,v2grid,v3grid)
+    call BGfield_Lagrangian(cfg,x,electrovars,intvars)
 
     !> Precipitation input setup
     if(myid==0) print*, 'Priming precipitation input'
@@ -170,7 +193,7 @@ contains
     !> Neutral atmosphere setup
     if(myid==0) print*, 'Computing background and priming neutral perturbation input (if used)'
     call msisinit_in(cfg)
-    call init_neutralBG_in(cfg,x,dt,t,ymd,UTsec,v2grid,v3grid,intvars)
+    call init_neutralBG_in(cfg,x,dt,t,ymd,UTsec,intvars)
     call init_neutralperturb_in(dt,cfg,x,intvars,ymd,UTsec)
 
     !> Recompute drifts and make some decisions about whether to invoke a Lagrangian grid
@@ -187,7 +210,7 @@ contains
       if ( it/=1 .and. flagneuBG .and. t>tneuBG) then              !we dont' throttle for tneuBG so we have to do things this way to not skip over...
         call cpu_time(tstart)
         call neutral_atmos_winds(cfg,x,ymd,UTsec,intvars)          ! load background states into module variables
-        call neutral_atmos_wind_update(intvars,v2grid,v3grid)      ! apply to variables in this program unit
+        call neutral_atmos_wind_update(intvars)      ! apply to variables in this program unit
         tneuBG=tneuBG+dtneuBG
         if (myid==0) then
           call cpu_time(tfin)
@@ -198,7 +221,7 @@ contains
       !> get neutral perturbations
       if (flagdneu==1) then
         call cpu_time(tstart)
-        call neutral_perturb_in(cfg,intvars,x,dt,t,ymd,UTsec,v2grid,v3grid)
+        call neutral_perturb_in(cfg,intvars,x,dt,t,ymd,UTsec)
         if (myid==0 .and. debug) then
           call cpu_time(tfin)
           print *, 'Neutral perturbations calculated in time:  ',tfin-tstart
@@ -244,7 +267,10 @@ contains
 
     !> deallocate variables and module data
     call clear_dneu_in(intvars)
-    call gemini_dealloc(cfg,fluidvars,fluidauxvars,electrovars,intvars)
+    !call gemini_dealloc(cfg,fluidvars,fluidauxvars,electrovars,intvars)
+    call gemini_double_dealloc(fluidvars,fluidauxvars,electrovars)
+    call gemini_work_dealloc(cfg,intvars)
+    call gemini_cfg_dealloc(cfg)
   end subroutine gemini_main
 
 
@@ -277,10 +303,21 @@ contains
 
     ! advection substep for all species
     call cpu_time(tstart)
-    call halo_interface_vels_allspec_in(x,fluidvars,lsp)
-    call interface_vels_allspec_in(fluidvars,intvars,lsp)    ! needs to happen regardless of ions v. electron due to energy eqn.
+
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    ! Old haloing code; possibly more efficient as it only haloes one ghost cell for interface velocities
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    ! call halo_interface_vels_allspec_in(x,fluidvars,lsp)
+    ! call interface_vels_allspec_in(fluidvars,intvars,lsp)    ! needs to happen regardless of ions v. electron due to energy eqn.
+    ! call set_global_boundaries_allspec_in(x,fluidvars,fluidauxvars,intvars,lsp)
+    ! call halo_allparams_in(x,fluidvars,fluidauxvars)
+
+    ! New haloing code; probably very little performance penalty here
     call set_global_boundaries_allspec_in(x,fluidvars,fluidauxvars,intvars,lsp)
-    call halo_allparams_in(x,fluidvars,fluidauxvars)
+    call halo_fluidvars_in(x,fluidvars,fluidauxvars)
+    call interface_vels_allspec_in(fluidvars,intvars,lsp)    ! needs to happen regardless of ions v. electron due to energy eqn.
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
     call sweep3_allparams_in(fluidvars,fluidauxvars,intvars,x,dt)
     call sweep1_allparams_in(fluidvars,fluidauxvars,intvars,x,dt)
     call halo_allparams_in(x,fluidvars,fluidauxvars)
@@ -298,7 +335,17 @@ contains
     ! Compute artifical viscosity and then execute compression calculation
     call cpu_time(tstart)
     call VNRicht_artvisc_in(fluidvars,intvars)
-    call RK2_prep_mpi_allspec_in(x,fluidvars)     ! halos velocity so we can take a divergence without artifacts
+
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    ! Old haloing code; almost certainly more efficient since this only haloes one ghost cell
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    ! call RK2_prep_mpi_allspec_in(x,fluidvars)     ! halos velocity so we can take a divergence without artifacts
+
+    ! This code is more general but does waste time haloing unneeded parameters and ghost cells
+    call halo_fluidvars_in(x,fluidvars,fluidauxvars)
+    call RK2_global_boundary_allspec_in(x,fluidvars)
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
     call compression_in(fluidvars,fluidauxvars,intvars,x,dt)   ! this applies compression substep and then converts back to temperature
     call rhoe2T_in(fluidvars,fluidauxvars)
     call clean_param_in(3,x,fluidvars)

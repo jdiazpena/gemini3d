@@ -7,20 +7,19 @@ use, intrinsic :: iso_fortran_env, only : stderr=>error_unit
 
 use magcalc_cli, only : cli
 use phys_consts, only : pi,mu0, wp, re, debug
-use grid, only : lx1, lx2, lx3, lx2all,lx3all,grid_size
-use grid_mpi, only: read_grid
+use grid, only : lx1, lx2, lx3, lx2all,lx3all,grid_size,read_grid
 use meshobj, only : curvmesh
 use timeutils, only : dateinc,find_time_elapsed
 use gemini3d_config, only : gemini_cfg
 use io, only : input_plasma_currents,create_outdir_mag,output_magfields
-use mpimod, only: mpi_sum, mpi_comm_world, &
-mpibreakdown, process_grid_auto, mpi_manualgrid, halo_end, &
+use mpimod, only: mpibreakdown, process_grid_auto, mpi_manualgrid, halo_end, &
 mpi_cfg, mpi_realprec, tag=>gemini_mpi
 use h5fortran, only : hdf5_file
 use filesystem, only : suffix
 
+use mpi_f08, only: mpi_init,mpi_finalize,mpi_comm_rank,mpi_reduce,mpi_sum, mpi_comm_world
+
 implicit none (type, external)
-external :: mpi_init,mpi_finalize,mpi_comm_rank,mpi_reduce
 
 !> VARIABLES READ IN FROM CONFIG FILE
 
@@ -43,7 +42,7 @@ real(wp), dimension(:,:,:), allocatable :: J1,J2,J3      !electrodynamic state v
 real(wp) :: t=0, dt      !time from beginning of simulation (s) and time step (s)
 real(wp) :: tout    !time for next output and time between outputs
 real(wp) :: tstart,tfin   !temp. vars. for measuring performance of code blocks
-integer :: it,isp        !time and species loop indices
+integer :: it        !time and species loop indices
 
 !WORK ARRAYS
 integer :: flag2D
@@ -57,19 +56,16 @@ real(wp), dimension(:,:,:), allocatable :: proj_e1etheta,proj_e2etheta,proj_e3et
 real(wp), dimension(:,:,:), allocatable :: proj_e1ephi,proj_e2ephi,proj_e3ephi
 real(wp), dimension(:,:,:), allocatable :: Jx,Jy,Jz
 real(wp), dimension(:,:,:), allocatable :: Rx,Ry,Rz,Rcubed
-real(wp), dimension(:,:,:), allocatable :: integrand,integrandavg
+real(wp), dimension(:,:,:), allocatable :: integrand
 real(wp), dimension(:,:,:), allocatable :: alt
 real(wp), dimension(:), allocatable :: Br,Btheta,Bphi
 real(wp), dimension(:), allocatable :: Brall,Bthetaall,Bphiall
 real(wp), dimension(:,:), allocatable :: Jxend,Jyend,Jzend,Rxend,Ryend,Rzend,Rcubedend,dVend,Rmagend
 real(wp), dimension(:,:), allocatable :: integrandend
-real(wp), dimension(:,:), allocatable :: integrandavgend
 
 real(wp), dimension(:,:), allocatable :: Jxtop,Jytop,Jztop,Rxtop,Rytop,Rztop,Rcubedtop,dVtop,Rmagtop
 real(wp), dimension(:,:), allocatable :: integrandtop
-real(wp), dimension(:,:), allocatable :: integrandavgtop
 real(wp), dimension(:), allocatable :: integrandcorner
-real(wp), dimension(:), allocatable :: integrandavgcorner
 
 real(wp), dimension(:,:), allocatable :: xpend,ypend,zpend
 real(wp), dimension(:,:), allocatable :: xptop,yptop,zptop
@@ -88,19 +84,14 @@ integer :: lid2in,lid3in
 !real(wp), parameter :: R3min=1d9
 !real(wp), parameter :: Rmin=5d3
 
-integer :: ierr
-
 !! for keeping track of start and end times requested by the user
 integer, dimension(3) :: ymdstart,ymdend,ymdfinal
 real(wp) :: UTsecstart,UTsecend,telend,UTsecfinal
 real(wp) :: h1avg,h2avg,h3avg
 real(wp), dimension(:,:,:), allocatable :: Rmag
 
-integer :: iid
-character(256) :: filename
-
 !! --- MAIN PROGRAM
-call mpi_init(ierr)
+call mpi_init()
 
 !> get command line parameters and simulation config
 call cli(cfg,lid2in,lid3in,debug,ymdstart,UTsecstart,ymdend,UTsecend)
@@ -449,9 +440,9 @@ main : do while (t < cfg%tdur)
   if (mpi_cfg%myid ==0) then
     if(debug) print *, 'Attempting reduction of magnetic field...'
   end if
-  call mpi_reduce(Br,Brall,lpoints,mpi_realprec,MPI_SUM,0,MPI_COMM_WORLD,ierr)
-  call mpi_reduce(Btheta,Bthetaall,lpoints,mpi_realprec,MPI_SUM,0,MPI_COMM_WORLD,ierr)
-  call mpi_reduce(Bphi,Bphiall,lpoints,mpi_realprec,MPI_SUM,0,MPI_COMM_WORLD,ierr)
+  call mpi_reduce(Br,Brall,lpoints,mpi_realprec,MPI_SUM,0,MPI_COMM_WORLD)
+  call mpi_reduce(Btheta,Bthetaall,lpoints,mpi_realprec,MPI_SUM,0,MPI_COMM_WORLD)
+  call mpi_reduce(Bphi,Bphiall,lpoints,mpi_realprec,MPI_SUM,0,MPI_COMM_WORLD)
   if (mpi_cfg%myid == 0) then
     if(debug) print *, 'magcalc.f90 --> Reduced magnetic field...'
     if(debug) print *, '  --> Min/max values of reduced field',minval(Brall),maxval(Brall),minval(Bthetaall),maxval(Bthetaall), &
@@ -460,8 +451,7 @@ main : do while (t < cfg%tdur)
 
 
   if (cfg%dryrun) then
-    ierr = mpibreakdown()
-    if (ierr /= 0) error stop 'MAGCALC: dry run MPI shutdown failure'
+    if (mpibreakdown() /= 0) error stop 'MAGCALC: dry run MPI shutdown failure'
     stop "OK: MAGCALC dry run"
   endif
 
@@ -512,10 +502,9 @@ deallocate(integrandcorner)
 
 
 !! SHUT DOWN MPI
-ierr = mpibreakdown()
 
-if (ierr /= 0) then
-  write(stderr, *) 'MAGCALC: abnormal MPI shutdown code', ierr, 'Process #', mpi_cfg%myid,' /',mpi_cfg%lid-1
+if (mpibreakdown() /= 0) then
+  write(stderr, *) 'MAGCALC: abnormal MPI shutdown: Process #', mpi_cfg%myid,' /',mpi_cfg%lid-1
   error stop
 endif
 

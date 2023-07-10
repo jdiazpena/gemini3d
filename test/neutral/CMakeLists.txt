@@ -1,10 +1,10 @@
-set_directory_properties(PROPERTIES LABEL neutral)
+set_property(DIRECTORY PROPERTY LABEL neutral)
 
 add_executable(test_proj test_proj.f90
 )
 
 foreach(t newton spherical geomagnetic meshobj meshobj_cart meshobj_dipole grid autogrid neutral interp
-neutraldata neutraldata3D_mpi neutraldata3D_geom_mpi neutraldata3D_geog_mpi neutraldata2D neutraldata2Daxisymm neutraldata2Dcart
+neutraldata neutraldata3D neutraldata3D_mpi neutraldata3D_geom_mpi neutraldata3D_geog_mpi neutraldata2D neutraldata2Daxisymm neutraldata2Dcart
 )
 
   target_sources(test_proj PRIVATE $<TARGET_OBJECTS:${t}>)
@@ -19,21 +19,22 @@ msis::msis_ifc
 $<$<BOOL:${hwm14}>:hwm14::hwm_ifc>
 )
 if(CMAKE_Fortran_COMPILER_ID MATCHES "^Intel")
-  set_target_properties(test_proj PROPERTIES LINKER_LANGUAGE Fortran)
+  set_property(TARGET test_proj PROPERTY LINKER_LANGUAGE Fortran)
 else()
-  set_target_properties(test_proj PROPERTIES LINKER_LANGUAGE CXX)
+  set_property(TARGET test_proj PROPERTY LINKER_LANGUAGE CXX)
 endif()
 
-set(_cmd $<TARGET_FILE:test_proj>)
-if(mpi)
-  list(PREPEND _cmd ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2)
-endif()
 
 add_test(NAME Projection
-COMMAND ${_cmd}
+COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 $<TARGET_FILE:test_proj>
 )
 set_tests_properties(Projection PROPERTIES
-TIMEOUT 90
+PROCESSORS 2
 LABELS unit
 FIXTURES_REQUIRED mpi_fxt
 )
+if(DEFINED mpi_tmpdir)
+  set_property(TEST Projection PROPERTY ENVIRONMENT "TMPDIR=${mpi_tmpdir}")
+endif()
+
+dll_test_path("ffilesystem::filesystem" Projection)

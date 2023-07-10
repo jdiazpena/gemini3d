@@ -15,6 +15,7 @@ use timeutils, only: dateinc,date_filename
 use grid, only: lx1,lx2,lx2all,lx3,lx3all,gridflag
 
 implicit none (type, external)
+private
 public :: efielddata
 
 type, extends(inputdata) :: efielddata
@@ -211,7 +212,7 @@ contains
     ! read sizes
     print '(/,A,/,A)', 'Electric field input:','--------------------'
     print '(A)', 'READ electric field size from: ' // self%sourcedir
-    call get_simsize2(self%sourcedir, llon=self%llon, llat=self%llat)
+    call get_simsize2(self%sourcedir // "/simsize.h5", llon=self%llon, llat=self%llat)
 
     print '(A,2I6)', 'Electric field size: llon,llat:  ',self%llon,self%llat
     if (self%llon < 1 .or. self%llat < 1) then
@@ -232,7 +233,7 @@ contains
     class(efielddata), intent(inout) :: self
 
     ! read grid data
-    call get_grid2(self%sourcedir, self%mlonp, self%mlatp)
+    call get_grid2(self%sourcedir // "/simgrid.h5", self%mlonp, self%mlatp)
 
     print '(A,4F9.3)', 'Electric field mlon,mlat extent:  ',minval(self%mlonp(:)),maxval(self%mlonp(:)), &
                                                            minval(self%mlatp(:)),maxval(self%mlatp(:))
@@ -245,11 +246,13 @@ contains
     class(efielddata), intent(inout) :: self
     type(gemini_cfg), intent(in) :: cfg     ! presently not used but possibly eventually?
     class(curvmesh), intent(in) :: x
-    integer :: ix2,ix3,iflat,ix1ref,ix2ref,ix3ref
+    integer :: ix2,ix3,iflat,ix1ref,ix2ref,ix3ref,ix1offset,ix2offset,ix3offset
 
-
-    print*, shape(self%coord1i),shape(self%coord2i),shape(self%coord3i)
-
+    ! source arrays in the grid object may have ghost cells; these are offsets for arrays that do not
+    !   preserve lbound and ubound, e.g. array(:,1,1) and the like
+    ix1offset=1-lbound(x%rall,1)
+    ix2offset=1-lbound(x%rall,2)
+    ix3offset=1-lbound(x%rall,3)
 
     !! reference locations for determining points onto which we are interpolating
     !! these are grid specific, not object specific...
@@ -268,7 +271,8 @@ contains
 
     !! by default the code uses 300km altitude as a reference location, using the center x2,x3 point
     !! These are the coordinates for inputs varying along axes 2,3
-    ix1ref = minloc(abs(x%rall(:,ix2ref,ix3ref) - Re - 300e3_wp), dim=1)
+    ix1ref = minloc(abs(x%rall(:,ix2ref,ix3ref) - Re - 300e3_wp), dim=1)    ! includes ghost cells if x%rall has ghost cells
+    ix1ref=ix1ref-ix1offset
     do ix3=1,lx3all
       do ix2=1,lx2all
         iflat=(ix3-1)*lx2all+ix2
@@ -311,8 +315,10 @@ contains
     real(wp), intent(in) :: t,dtmodel
     integer, dimension(3), intent(inout) :: ymdtmp
     real(wp), intent(inout) :: UTsectmp
-    integer :: iid,ierr
     integer :: flagdirich_int
+
+    UTsectmp = 0*t*dtmodel
+    !! avoid unused argument warning
 
     !! all workers should update the date
     ymdtmp = self%ymdref(:,2)
@@ -323,7 +329,7 @@ contains
     print*, '  date and time:  ',ymdtmp,UTsectmp
     print*, '  efield filename:  ',date_filename(self%sourcedir,ymdtmp,UTsectmp)
 
-    call get_Efield(date_filename(self%sourcedir, ymdtmp, UTsectmp), &
+    call get_Efield(date_filename(self%sourcedir, ymdtmp, UTsectmp) // ".h5", &
       flagdirich_int,self%E0xp,self%E0yp,self%Vminx1p,self%Vmaxx1p,&
       self%Vminx2pslice,self%Vmaxx2pslice,self%Vminx3pslice,self%Vmaxx3pslice)
     self%flagdirich=real(flagdirich_int,wp)

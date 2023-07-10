@@ -8,7 +8,8 @@ use interpolation, only : interp1,interp2,interp3
 use timeutils, only : dateinc, date_filename, find_lastdate
 
 implicit none (type, external)
-public
+private
+public :: inputdata
 
 
 !> this is a generic class for an data object being input into the model and interpolated in space and time
@@ -81,6 +82,9 @@ type, abstract :: inputdata
     procedure(initproc), deferred :: init        ! set up object for first time step:  call read in grid, set sizes, init_storage,
                                                  !   call prime_data, set data cadence based on some input
     procedure :: update                          ! check to see if new file needs to be read and read accordingly (will need to call deferred loaddata)
+    procedure :: get_locationsi                  ! (no-op, extensions need to override) return a pointer to some locations to be used directly by user
+    procedure :: get_datainow_ptr                ! (no-op) extensions need to return a pointer to a place where data can directly be fed
+    procedure :: set_datainow                    ! (no-op, extensions shoudl override) user wants to directly set data from locations returned by get_locationsi
 
     !! internal/fine-grained control
     procedure :: set_sizes             ! initiate sizes for coordinate axes and number of datasets of different dimensionality
@@ -318,8 +322,8 @@ contains
     real(wp), intent(in) :: dtmodel             ! model time and time step
     integer, dimension(3), intent(in) :: ymd ! date from which we need to prime input data
     real(wp), intent(in) :: UTsec            ! time from which we need to prime input data
-    integer, dimension(3) :: ymdprev,ymdnext,ymdtmp
-    real(wp) :: UTsecprev,UTsecnext,UTsectmp
+    integer, dimension(3) :: ymdtmp
+    real(wp) :: UTsectmp
 
     ! fIXME: unused variables
 
@@ -378,7 +382,6 @@ contains
     integer, dimension(3), intent(in) :: ymd    ! date for which we wish to calculate perturbations
     real(wp), intent(in) :: UTsec               ! UT seconds for which we compute perturbations
 
-    integer :: ix1,ix2,ix3,iid!,irhon,izn
     integer, dimension(3) :: ymdtmp          ! these hold the incremented date following reading of new file
     real(wp) :: UTsectmp
 
@@ -698,6 +701,38 @@ contains
     !> update current time in object
     self%tnow=t+dt/2
   end subroutine timeinterp
+
+
+  !> These will do nothing for now, can override with custom code as needed
+  subroutine get_locationsi(self,flagallpts,zlims,xlims,ylims,zvals,xvals,yvals,datavals)
+    class(inputdata), intent(inout) :: self
+    logical, intent(in) :: flagallpts
+    real(wp), dimension(2), intent(in) :: zlims,xlims,ylims    ! global boundary of neutral grid we are accepting data from
+    real(wp), dimension(:), pointer, intent(inout) :: zvals,xvals,yvals
+    real(wp), dimension(:,:), pointer, intent(inout) :: datavals
+
+    print*, 'WARNING:  triggered no-op get_locationsi, use an extension with a full implementation'
+    return
+  end subroutine
+
+
+  function get_datainow_ptr(self) result(datavals)
+    class(inputdata), intent(inout) :: self
+    real(wp), dimension(:,:), pointer :: datavals 
+
+    print*, 'WARNING:  triggered no-op get_locationsi, use an extension with a full implementation'
+    return
+  end function get_datainow_ptr
+
+
+  !> We assume that the get_locationsi will provide a memory space for the results which are stored in the object extension
+  !    so no additional inputs are needed to copy those data out into the proper object arrays.  
+  subroutine set_datainow(self)
+    class(inputdata), intent(inout) :: self
+
+    print*, 'WARNING:  triggered no-op set_datainow, use an extension with a full implementation'           
+    return
+  end subroutine set_datainow
 
 
   !> deallocate memory and dissociated pointers for generic array data
