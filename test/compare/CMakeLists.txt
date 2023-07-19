@@ -46,7 +46,7 @@ endfunction(matlab_compare)
 function(python_compare outdir refdir name)
 
 add_test(NAME gemini:compare:${name}:python
-COMMAND ${Python_EXECUTABLE} -m gemini3d.compare ${outdir} ${refdir} -file_format h5)
+COMMAND ${Python_EXECUTABLE} -m gemini3d.compare ${outdir} ${refdir})
 
 set_tests_properties(gemini:compare:${name}:python PROPERTIES
 FIXTURES_REQUIRED ${name}:run_fxt

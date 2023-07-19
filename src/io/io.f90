@@ -18,8 +18,8 @@ public :: create_outdir, &
 
 
 interface !< aurora.f90
-  module subroutine output_aur(outdir,flagglow,ymd,UTsec,iver, out_format)
-    character(*), intent(in) :: outdir, out_format
+  module subroutine output_aur(outdir,flagglow,ymd,UTsec,iver)
+    character(*), intent(in) :: outdir
     integer, intent(in) :: flagglow
     integer, dimension(3), intent(in) :: ymd
     real(wp), intent(in) :: UTsec
@@ -29,8 +29,8 @@ end interface
 
 
 interface !< cond.f90
-  module subroutine output_cond(outdir, ymd, UTsec, sig0, sigP, sigH, out_format)
-    character(*), intent(in) :: outdir, out_format
+  module subroutine output_cond(outdir, ymd, UTsec, sig0, sigP, sigH)
+    character(*), intent(in) :: outdir
     integer, dimension(3), intent(in) :: ymd
     real(wp), intent(in) :: UTsec
     real(wp), dimension(:,:,:), intent(in) :: sig0, sigP, sigH
@@ -44,8 +44,8 @@ interface !< mag.f90
     character(*), intent(in) :: fieldpointfile
   end subroutine create_outdir_mag
 
-  module subroutine output_magfields(outdir,ymd,UTsec,Br,Btheta,Bphi, out_format)
-    character(*), intent(in) :: outdir, out_format
+  module subroutine output_magfields(outdir,ymd,UTsec,Br,Btheta,Bphi)
+    character(*), intent(in) :: outdir
     integer, intent(in) :: ymd(3)
     real(wp), intent(in) :: UTsec
     real(wp), dimension(:), intent(in)  :: Br,Btheta,Bphi
@@ -66,8 +66,8 @@ interface !< plasma.f90
     !! intent(out)
   end subroutine input_plasma
 
-  module subroutine input_plasma_currents(outdir,out_format,flagoutput,ymd,UTsec,J1,J2,J3)
-    character(*), intent(in) :: outdir, out_format
+  module subroutine input_plasma_currents(outdir, flagoutput,ymd,UTsec,J1,J2,J3)
+    character(*), intent(in) :: outdir
     integer, intent(in) :: flagoutput
     integer, dimension(3), intent(in) :: ymd
     real(wp), intent(in) :: UTsec
@@ -75,8 +75,8 @@ interface !< plasma.f90
     !! intent(out)
   end subroutine input_plasma_currents
 
-  module subroutine output_plasma(outdir,flagoutput,ymd,UTsec,vs2,vs3,ns,vs1,Ts,Phiall,J1,J2,J3, out_format)
-    character(*), intent(in) :: outdir, out_format
+  module subroutine output_plasma(outdir,flagoutput,ymd,UTsec,vs2,vs3,ns,vs1,Ts,Phiall,J1,J2,J3)
+    character(*), intent(in) :: outdir
     integer, intent(in) :: flagoutput
     integer, dimension(3), intent(in) :: ymd
     real(wp), intent(in) :: UTsec

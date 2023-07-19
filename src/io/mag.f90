@@ -32,12 +32,7 @@ end procedure create_outdir_mag
 
 module procedure output_magfields
 
-select case (out_format)
-case ('h5')
-  call output_magfields_hdf5(outdir,ymd,UTsec,Br,Btheta,Bphi)
-case default
-  error stop 'ERROR:gemini3d:mag:output_magfields: unknown file format' // out_format
-end select
+call output_magfields_hdf5(outdir,ymd,UTsec,Br,Btheta,Bphi)
 
 call check_finite_mag(outdir, Br, Btheta, Bphi)
 

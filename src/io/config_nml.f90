@@ -3,7 +3,7 @@ submodule(gemini3d_config) config_nml
 use, intrinsic :: iso_fortran_env, only : stderr => error_unit
 
 use gemini3d_sysinfo, only : expand_envvar, get_compiler_vendor
-use filesystem, only : make_absolute, suffix
+use filesystem, only : make_absolute
 
 implicit none (type, external)
 
@@ -32,7 +32,10 @@ real(wp) :: dtneu
 real(wp) :: dxn=0.0,drhon=0.0,dzn=0.0
 real(wp) :: dtprec=0
 character(1000) :: indat_size, indat_grid, indat_file, source_dir, prec_dir, E0_dir
-character(4) :: file_format=""  !< need to initialize blank or random invisible fouls len_trim>0
+
+character(4) :: file_format=""
+!! no longer used, we always write HDF5 data files
+
 real(wp) :: dtE0=0
 real(wp) :: dtglow=0, dtglowout=0
 logical :: flagEIA
@@ -103,14 +106,6 @@ cfg%flagoutput = flagoutput
 rewind(u)
 read(u, nml=files, iostat=i)
 call check_nml_io(i, cfg%infile, "files")
-
-!> auto file_format if not specified
-if (len_trim(file_format) > 0) then
-  cfg%out_format = trim(file_format)
-else
-  file_format = suffix(indat_size)
-  cfg%out_format = file_format(2:)
-endif
 
 !> absolute paths or paths relative to cfg%outdir
 cfg%indatsize = make_absolute(expand_envvar(indat_size), cfg%outdir)

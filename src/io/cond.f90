@@ -31,7 +31,7 @@ outdir_cond = outdir // '/conductivity'
 if(.not. is_dir(outdir_cond)) call mkdir(outdir_cond)
 
 if (mpi_cfg%myid == 0) then
-  call output_cond_root(date_filename(outdir, ymd, UTsec), sig0, sigP, sigH, out_format)
+  call output_cond_root(date_filename(outdir, ymd, UTsec), sig0, sigP, sigH)
 else
   call output_cond_workers(sig0, sigP, sigH)
 end if
@@ -39,16 +39,11 @@ end if
 end procedure output_cond
 
 
-subroutine output_cond_root(stem, sig0, sigP, sigH, out_format)
-character(*), intent(in) :: stem, out_format
+subroutine output_cond_root(stem, sig0, sigP, sigH)
+character(*), intent(in) :: stem
 real(wp), dimension(:,:,:), intent(in) :: sig0, sigP, sigH
 
-select case (out_format)
-case ('h5')
-  call output_cond_root_hdf5(stem // ".h5", sig0, sigP, sigH)
-case default
-  error stop 'io:cond:output_cond_root: unknown grid format' // out_format
-end select
+call output_cond_root_hdf5(stem // ".h5", sig0, sigP, sigH)
 
 if(.not. all(ieee_is_finite(sig0))) error stop 'io:output_cond: non-finite sig0'
 if(.not. all(ieee_is_finite(sigP))) error stop 'io:output_cond: non-finite sigP'

@@ -34,7 +34,7 @@ outdir_aur = outdir // '/aurmaps'
 if(.not. is_dir(outdir_aur)) call mkdir(outdir_aur)
 
 if (mpi_cfg%myid == 0) then
-  call output_aur_root(date_filename(outdir_aur, ymd, UTsec), flagglow,iver, out_format)
+  call output_aur_root(date_filename(outdir_aur, ymd, UTsec), flagglow,iver)
 else
   call output_aur_workers(iver)
 end if
@@ -42,18 +42,13 @@ end if
 end procedure output_aur
 
 
-subroutine output_aur_root(stem, flagglow, iver, out_format)
+subroutine output_aur_root(stem, flagglow, iver)
 
-character(*), intent(in) :: stem, out_format
+character(*), intent(in) :: stem
 integer, intent(in) :: flagglow
 real(wp), dimension(:,:,:), intent(in) :: iver
 
-select case (out_format)
-case ('h5')
-  call output_aur_root_hdf5(stem // ".h5", flagglow, iver)
-case default
-  error stop 'ERROR:aurora:output_aur_root: unknown grid format' // out_format
-end select
+call output_aur_root_hdf5(stem // ".h5", flagglow, iver)
 
 if(.not. all(ieee_is_finite(iver))) error stop 'ERROR: iverout: non-finite value(s)'
 

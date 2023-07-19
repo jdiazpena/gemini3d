@@ -119,7 +119,7 @@ contains
 !
 !      ! FIXME: instead keep tdur and just adjust the start time of the simulation to be closer to endtime
 !      tdur=cfg%tdur-ttmp    ! subtract off time that has elapsed to milestone
-!      ! FIXME: need to feed in the t variable and overwrite it if we are restarting.  
+!      ! FIXME: need to feed in the t variable and overwrite it if we are restarting.
 !
 !      if (mpi_cfg%myid==0) then
 !        print*, 'Treating the following file as initial conditions:  ',filetmp
@@ -231,14 +231,12 @@ contains
       if (cfg%mcadence>0 .and. abs(t-tmilestone) < 1d-5) then
         flagoutput=1    !force a full output at the milestone
         call output_plasma(cfg%outdir,flagoutput,ymd, &
-          UTsec,vs2,vs3,ns,vs1,Ts,intvars%Phiall,J1,J2,J3, &
-          cfg%out_format)
+          UTsec,vs2,vs3,ns,vs1,Ts,intvars%Phiall,J1,J2,J3)
         tmilestone = t + cfg%dtout * cfg%mcadence
         if(mpi_cfg%myid==0) print*, 'Milestone output triggered.'
       else
         call output_plasma(cfg%outdir,flagoutput,ymd, &
-          UTsec,vs2,vs3,ns,vs1,Ts,intvars%Phiall,J1,J2,J3, &
-          cfg%out_format)
+          UTsec,vs2,vs3,ns,vs1,Ts,intvars%Phiall,J1,J2,J3)
       end if
       if (mpi_cfg%myid==0 .and. debug) then
         call cpu_time(tfin)
@@ -249,7 +247,7 @@ contains
     !> GLOW file output
     if ((cfg%flagglow /= 0) .and. (abs(t-tglowout) < 1d-5)) then !same as plasma output
       call cpu_time(tstart)
-      call output_aur(cfg%outdir, cfg%flagglow, ymd, UTsec, intvars%iver, cfg%out_format)
+      call output_aur(cfg%outdir, cfg%flagglow, ymd, UTsec, intvars%iver)
       if (mpi_cfg%myid==0) then
         call cpu_time(tfin)
         print *, 'Auroral output done for time step:  ',t,' in cpu_time of: ',tfin-tstart

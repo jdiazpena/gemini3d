@@ -18,8 +18,7 @@ type :: gemini_cfg
   logical :: dryrun = .false.
 
   !> file information (files)
-  character(:), allocatable :: infile,outdir,indatsize,indatgrid,indatfile,out_format, &
-    fieldpointfile
+  character(:), allocatable :: infile,outdir,indatsize,indatgrid,indatfile, fieldpointfile
 
   character(:), allocatable :: git_revision
 

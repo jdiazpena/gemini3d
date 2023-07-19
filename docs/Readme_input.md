@@ -46,7 +46,6 @@ flagoutput = 1                ! what information to put in output files:  1 - al
 
 ! Inputs file locations and format
 &files
-file_format = 'h5'                                                 ! format of the input files
 indat_size = 'test_data/test3d_glow/inputs/simsize.h5'
 indat_grid = 'test_data/test3d_glow/inputs/simgrid.h5'
 indat_file = 'test_data/test3d_glow/inputs/initial_conditions.h5'

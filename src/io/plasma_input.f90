@@ -35,21 +35,15 @@ end interface
 
 contains
 
-subroutine input_root_currents(outdir,out_format, flagoutput,ymd,UTsec,J1,J2,J3)
-  character(*), intent(in) :: outdir, out_format
+subroutine input_root_currents(outdir, flagoutput,ymd,UTsec,J1,J2,J3)
+  character(*), intent(in) :: outdir
   integer, intent(in) :: flagoutput
   integer, dimension(3), intent(in) :: ymd
   real(wp), intent(in) :: UTsec
   real(wp), dimension(:,:,:), intent(inout) :: J1,J2,J3
   !! intent(out)
 
-
-  select case(out_format)
-  case('h5')
-    call input_root_currents_hdf5(outdir,flagoutput,ymd,UTsec,J1,J2,J3)
-  case default
-    error stop 'input_root_current: unexpected Gemini input: ' // out_format
-  end select
+  call input_root_currents_hdf5(outdir,flagoutput,ymd,UTsec,J1,J2,J3)
 end subroutine input_root_currents
 
 
@@ -89,7 +83,7 @@ end procedure input_plasma
     if (mpi_cfg%myid==0) then
       !> ROOT FINDS/CALCULATES INITIAL CONDITIONS AND SENDS TO WORKERS
       print *, 'Assembling current density data on root...  '
-      call input_root_currents(outdir, out_format,flagoutput,ymd,UTsec,J1,J2,J3)
+      call input_root_currents(outdir,flagoutput,ymd,UTsec,J1,J2,J3)
 
       call check_finite_current(outdir, J1, J2, J3)
     else
