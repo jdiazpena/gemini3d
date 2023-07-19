@@ -719,9 +719,18 @@ subroutine clean_param_after_regrid(x,paramflag,param)
   integer, intent(in) :: paramflag
   real(wp), dimension(-1:,-1:,-1:,:), intent(inout) :: param     !note that this is 4D and is meant to include ghost cells
   integer :: isp,ix1,ix2,ix3,iinull,ix1beg,ix1end,ix2beg
+  integer :: ibuf
+  integer, parameter :: lbuf=3     
+  !^ controls how far from null cells we want to forcibly replace data after a refine.  What is effectively being done here
+  !    is that we are copying data from some specified location into the buffer region.  This is likely acceptable because
+  !    the regions where we do this are very close to equilibrium so they will "snap" back to that state rather than generating
+  !    some weird transient from the forcibly replacement.  
 
   select case (paramflag)
-    case (1)    !density
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    ! Density
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    case (1)
       param(:,:,:,1:lsp-1)=max(param(:,:,:,1:lsp-1),mindens)    ! enforce a minimum density
       param(:,:,:,lsp)=sum(param(:,:,:,1:lsp-1),4)              !enforce charge neutrality based on ion densities
 
@@ -743,31 +752,12 @@ subroutine clean_param_after_regrid(x,paramflag,param)
             param(ix1,ix2,ix3,isp)=mindensnull
           end do
         end if
-
-        !> we want to try to prevent issues with interpolation of density
-        do ix3=1,lx3
-          do ix1=1,lx1
-            ix2beg=1
-            do while( (.not. x%nullpts(ix1,ix2beg,ix3)) .and. ix2beg<lx2)     !find the first non-null index for this field line, need to be careful if no null points exist...
-              ix2beg=ix2beg+1
-            end do
-
-            !ix1end=ix1beg
-            !do while(x%nullpts(ix1end,ix2,ix3) .and. ix1end<lx1)     !find the last non-null index for this field line
-            !  ix1end=ix1end+1
-            !end do
-            !!if (ix1end /= ix1beg .and. ix1end /= lx1) ix1end=ix1end-1      ! I think this has been left out for a long time!?
-
-            if (ix2beg /= lx2) then    !only do this if we actually have null grid points
-              param(ix1,ix2beg,ix3,isp)=mindensnull
-            end if
-            !if (ix1end /= lx1) then
-            !  param(ix1end,ix2,ix3,isp)=param(ix1end-1,ix2,ix3,isp)
-            !end if
-          end do
-        end do
       end do
-    case (2)    !velocity
+
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    ! Drift velocity
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    case (2)
       do isp=1,lsp       !set null cells to zero mometnum
         do iinull=1,x%lnull
           ix1=x%inull(iinull,1)
@@ -792,13 +782,16 @@ subroutine clean_param_after_regrid(x,paramflag,param)
               do while(x%nullpts(ix1end,ix2,ix3) .and. ix1end<lx1)     !find the last non-null index for this field line
                 ix1end=ix1end+1
               end do
-              !if (ix1end /= ix1beg .and. ix1end /= lx1) ix1end=ix1end-1      ! I think this has been left out for a long time!?
 
               if (ix1beg /= lx1) then    !only do this if we actually have null grid points
-                param(ix1beg,ix2,ix3,isp)=param(ix1beg+1,ix2,ix3,isp)
+                do ibuf=1,lbuf
+                  param(ix1beg+ibuf-1,ix2,ix3,isp)=param(ix1beg+lbuf,ix2,ix3,isp)
+                end do
               end if
               if (ix1end /= lx1) then
-                param(ix1end,ix2,ix3,isp)=param(ix1end-1,ix2,ix3,isp)
+                do ibuf=1,lbuf
+                  param(ix1end+ibuf-1,ix2,ix3,isp)=param(ix1end-lbuf,ix2,ix3,isp)
+                end do
               end if
             end do
           end do
@@ -819,7 +812,11 @@ subroutine clean_param_after_regrid(x,paramflag,param)
           end do
         end do
       end if
-    case (3)    !temperature
+
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    ! Temperature
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    case (3)
       param=max(param,100._wp)     !temperature floor
 
       do isp=1,lsp       !set null cells to some value
@@ -831,6 +828,56 @@ subroutine clean_param_after_regrid(x,paramflag,param)
           param(ix1,ix2,ix3,isp) = 100
         end do
       end do
+
+
+      !FORCE THE BORDER CELLS TO BE SAME AS THE FIRST INTERIOR CELL (deals with some issues on dipole grids), skip for non-dipole.
+      if (x%gridflag==0) then      ! closed dipole
+        do isp=1,lsp
+          do ix3=1,lx3
+            do ix2=1,lx2
+              ix1beg=1
+              do while( (.not. x%nullpts(ix1beg,ix2,ix3)) .and. ix1beg<lx1)     !find the first non-null index for this field line, need to be careful if no null points exist...
+                ix1beg=ix1beg+1
+              end do
+
+              ix1end=ix1beg
+              do while(x%nullpts(ix1end,ix2,ix3) .and. ix1end<lx1)     !find the last non-null index for this field line
+                ix1end=ix1end+1
+              end do
+
+              if (ix1beg /= lx1) then    !only do this if we actually have null grid points
+                do ibuf=1,lbuf
+                  param(ix1beg+ibuf-1,ix2,ix3,isp)=param(ix1beg+lbuf,ix2,ix3,isp)
+                end do
+              end if
+              if (ix1end /= lx1) then
+                do ibuf=1,lbuf
+                  param(ix1end+ibuf-1,ix2,ix3,isp)=param(ix1end-lbuf,ix2,ix3,isp)
+                end do
+              end if
+            end do
+          end do
+        end do
+      elseif (x%gridflag==1) then     ! open dipole grid, inverted
+        do isp=1,lsp
+          do ix3=1,lx3
+            do ix2=1,lx2
+              ix1end=1
+              do while((.not. x%nullpts(ix1end,ix2,ix3)) .and. ix1end<lx1)     !find the first non-null index for this field line
+                ix1end=ix1end+1
+              end do
+
+              if (ix1end /= lx1) then
+                param(ix1end,ix2,ix3,isp)=param(ix1end-1,ix2,ix3,isp)
+              end if
+            end do
+          end do
+        end do
+      end if
+
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    ! Error
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     case default
       !! throw an error as the code is likely not going to behave in a predictable way in this situation...
       error stop '!non-standard parameter selected in clean_params, unreliable/incorrect results possible...'

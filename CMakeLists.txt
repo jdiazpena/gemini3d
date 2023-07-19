@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.15...3.26)
+cmake_minimum_required(VERSION 3.15...3.27)
 
 # --- CMAKE_BUILD_TYPE default
 # The simulations are 10x slower for default to Debug.
@@ -29,25 +29,13 @@ if(NOT DEFINED ${PROJECT_NAME}_BUILD_TESTING)
 endif()
 
 include(cmake/package/git_rev.cmake)
-include(cmake/options.cmake)
+include(options.cmake)
 
 # Fortran filesystem library "ffilesystem"
 find_package(ffilesystem CONFIG)
 # this is the first package to find, so make a special error message for users
 if(NOT ffilesystem_FOUND)
   message(FATAL_ERROR ${need_gemext})
-endif()
-if(ffilesystem_VERSION VERSION_LESS 4.0)
-  message(STATUS "Skipping C++ frontend due to ffilesystem version ${ffilesystem_VERSION} < 4.0")
-  set(cpp false)
-endif()
-
-# for gemini_c C++ front end
-if(cpp)
-  find_package(iniparser CONFIG)
-  if(NOT iniparser_FOUND)
-    set(cpp false)
-  endif()
 endif()
 
 # --- MPI
@@ -73,7 +61,7 @@ include(cmake/compilers.cmake)
 
 # --- linear algebra libraries
 find_package(LAPACK REQUIRED)
-
+find_package(SCALAPACK REQUIRED) # for MUMPS
 find_package(MUMPS REQUIRED COMPONENTS d)
 
 # --- climate models
