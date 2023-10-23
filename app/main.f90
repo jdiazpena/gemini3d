@@ -169,7 +169,7 @@ contains
     print*, 'Done with read_grid_in...'
 
     !> Set initial time variables to simulation; this requires detecting whether we are trying to restart a simulation run
-    call get_initial_state(cfg,fluidvars,electrovars,intvars,x,UTsec,ymd,tdur,t)
+    call get_initial_state(cfg,fluidvars,electrovars,intvars,x,UTsec,ymd,tdur,t,tmilestone)
 
     !> initialize time stepping and some aux variables
     call set_start_values_auxtimevars(it,t,tout,tglowout,tneuBG)
@@ -372,6 +372,7 @@ contains
     !> all workers need to "agree" on a gravity and exospheric temperature
     call get_gavg_Tinf_in(intvars,gavg,Tninf)
 
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!    
     !> solve all source/loss processes
     call source_loss_allparams_in(cfg,fluidvars,fluidauxvars,electrovars,intvars, &
                                     x,dt/lsub,t,ymd,UTsec,f107a,f107,first,gavg,Tninf)

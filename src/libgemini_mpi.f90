@@ -145,7 +145,7 @@ contains
 
 
   !> load initial conditions and check if this is a restart run; set time variables accordingly
-  subroutine get_initial_state(cfg,fluidvars,electrovars,intvars,x,UTsec,ymd,tdur,t)
+  subroutine get_initial_state(cfg,fluidvars,electrovars,intvars,x,UTsec,ymd,tdur,t,tmilestone)
     type(gemini_cfg), intent(inout) :: cfg
     real(wp), dimension(:,:,:,:), pointer, intent(inout) :: fluidvars
     real(wp), dimension(:,:,:,:), pointer, intent(inout) :: electrovars
@@ -153,7 +153,7 @@ contains
     class(curvmesh), intent(in) :: x
     real(wp), intent(inout) :: UTsec
     integer, dimension(3), intent(inout) :: ymd
-    real(wp), intent(inout) :: tdur,t
+    real(wp), intent(inout) :: tdur,t,tmilestone
 
     real(wp), dimension(:,:,:,:), pointer :: ns,vs1,vs2,vs3,Ts
     real(wp), dimension(:,:,:), pointer :: E1,E2,E3,J1,J2,J3,Phi
@@ -173,6 +173,7 @@ contains
 
       tremaining=cfg%tdur-t    ! subtract off time that has elapsed to milestone
       tdur=cfg%tdur
+      tmilestone=t
 
       if (mpi_cfg%myid==0) then
         print*, '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
