@@ -197,6 +197,8 @@ pure subroutine thermal_conduct(isp,Ts,ns,nn,J1,lambda,beta)
   !! intent(out)
   real(wp), dimension(1:size(Ts,1)-4,1:size(Ts,2)-4,1:size(Ts,3)-4) :: Tstmp1, Tstmp2, Teaux1, Teaux2
   integer :: lx1,lx2,lx3
+
+  !test change
   
   
   lx1=size(Ts,1)-4
